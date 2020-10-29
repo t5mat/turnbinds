@@ -21,7 +21,6 @@ In-game:
 - MOUSE1 - turn left
 - MOUSE2 - turn right
 - +SHIFT - slow down turn
-- Double tap CAPSLOCK - enable/disable
 
 ## Notes
 

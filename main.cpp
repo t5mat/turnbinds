@@ -201,7 +201,6 @@ struct RawInputState
     bool mouse1;
     bool mouse2;
     bool lshift;
-    bool caps;
 
     void process(const RAWINPUT &input)
     {
@@ -220,9 +219,6 @@ struct RawInputState
                     lshift = (key.Message == WM_KEYDOWN) || (key.Message == WM_KEYUP ? false : lshift);
                 }
                 break;
-            case VK_CAPITAL:
-                caps = (key.Message == WM_KEYDOWN) || (key.Message == WM_KEYUP ? false : caps);
-                break;
             }
             break;
         }
@@ -233,7 +229,6 @@ struct RawInputState
         mouse1 = win32::is_key_down(VK_LBUTTON);
         mouse2 = win32::is_key_down(VK_RBUTTON);
         lshift = win32::is_key_down(VK_LSHIFT);
-        caps = win32::is_key_down(VK_CAPITAL);
     }
 };
 
@@ -242,7 +237,6 @@ int main(int argc, char *argv[])
     constexpr auto VERSION_STRING = L"1.0.0";
     constexpr auto SLEEP_INTERVAL_HNS = 2500;
     constexpr auto ACTIVE_CHECK_INTERVAL = 1.0 / 20.0;
-    constexpr auto DOUBLE_TAP_INTERVAL = 500.0 / 1000.0;
     constexpr auto SLOWDOWN_FACTOR = 2.0 / 3.0;
     constexpr auto RATE_INCREASE = 50;
     constexpr auto RATE_MIN = 50;
@@ -252,7 +246,6 @@ int main(int argc, char *argv[])
     constexpr auto SPEED_MAX = 15000;
 
     bool active = false;
-    bool enabled = true;
     int rate = 1000;
     int speed = 5000;
 
@@ -276,7 +269,6 @@ int main(int argc, char *argv[])
 
     RawInputState input_state;
     RawInputState last_input_state;
-    long long caps_up_time = -1;
     long long active_check_time = -1;
     double mouse_remaining = 0.0;
     long long mouse_time = -1;
@@ -357,7 +349,7 @@ int main(int argc, char *argv[])
             out.fill(0, initial_cursor_position, info.dwSize.X * (initial_cursor_position.Y - info.dwCursorPosition.Y + 1) - info.dwCursorPosition.X);
 
             out.set_cursor_position(initial_cursor_position);
-            wprintf(L"\nturnbinds %s\nhttps://github.com/t5mat/turnbinds\n\n[%s]\n* Enabled: %s\n* Rate: %dhz\n* Speed: %d\n", VERSION_STRING, active ? L"active" : L"inactive", enabled ? L"yes" : L"no", rate, speed);
+            wprintf(L"\nturnbinds %s\nhttps://github.com/t5mat/turnbinds\n\n[%s]\n* Rate: %dhz\n* Speed: %d\n", VERSION_STRING, active ? L"active" : L"inactive", rate, speed);
         }
 
         bool changed_to_active = false;
@@ -371,23 +363,11 @@ int main(int argc, char *argv[])
             }
         }
 
-        bool changed_to_enabled = false;
-        if (last_input_state.caps && !input_state.caps) {
-            if (active && caps_up_time != -1 && current - caps_up_time <= frequency * DOUBLE_TAP_INTERVAL) {
-                enabled = !enabled;
-                changed_to_enabled = enabled;
-                caps_up_time = -1;
-                redraw = true;
-            } else {
-                caps_up_time = current;
-            }
-        }
-
         if (changed_to_active) {
             input_state.update();
         }
 
-        if (changed_to_active || changed_to_enabled || (last_input_state.mouse1 ^ input_state.mouse1) || (last_input_state.mouse2 ^ input_state.mouse2)) {
+        if (changed_to_active || (last_input_state.mouse1 ^ input_state.mouse1) || (last_input_state.mouse2 ^ input_state.mouse2)) {
             mouse_time = current;
             mouse_remaining = 0.0;
         }
@@ -400,7 +380,7 @@ int main(int argc, char *argv[])
         }
         current = win32::performance_counter();
 
-        if (active && enabled && input_state.mouse1 ^ input_state.mouse2 && current - mouse_time >= frequency * (1.0 / rate)) {
+        if (active && input_state.mouse1 ^ input_state.mouse2 && current - mouse_time >= frequency * (1.0 / rate)) {
             mouse_remaining +=
                 (int(input_state.mouse1) * -1 + int(input_state.mouse2)) *
                 (speed * (input_state.lshift ? SLOWDOWN_FACTOR : 1.0)) *
