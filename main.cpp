@@ -59,9 +59,55 @@ CURSORINFO get_mouse_cursor_info()
     return info;
 }
 
-bool is_key_down(int vk)
+size_t get_raw_input_messages(const RAWINPUT &input, USHORT *vks, UINT *messages, size_t size)
 {
-    return GetAsyncKeyState(vk) & 0x8000;
+    constexpr int MOUSE_DOWN[5] = {RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_2_DOWN, RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_5_DOWN};
+    constexpr int MOUSE_UP[5] = {RI_MOUSE_BUTTON_1_UP, RI_MOUSE_BUTTON_2_UP, RI_MOUSE_BUTTON_3_UP, RI_MOUSE_BUTTON_4_UP, RI_MOUSE_BUTTON_5_UP};
+    constexpr int MOUSE_VK[5] = {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2};
+
+    if (size == 0) {
+        return 0;
+    }
+
+    size_t count = 0;
+    switch (input.header.dwType) {
+    case RIM_TYPEMOUSE:
+        for (size_t i = 0; i < sizeof(MOUSE_DOWN) / sizeof(MOUSE_DOWN[0]) && count < size; ++i) {
+            if (input.data.mouse.usButtonFlags & MOUSE_DOWN[i]) {
+                vks[count] = MOUSE_VK[i];
+                messages[count] = WM_KEYDOWN;
+                ++count;
+            } else if (input.data.mouse.usButtonFlags & MOUSE_UP[i]) {
+                vks[count] = MOUSE_VK[i];
+                messages[count] = WM_KEYUP;
+                ++count;
+            }
+        }
+        break;
+    case RIM_TYPEKEYBOARD:
+        switch (input.data.keyboard.VKey) {
+        case VK_CONTROL:
+            if (input.header.hDevice == NULL) {
+                vks[count] = VK_ZOOM;
+            } else {
+                vks[count] = (input.data.keyboard.Flags & RI_KEY_E0 ? VK_RCONTROL : VK_LCONTROL);
+            }
+            break;
+        case VK_MENU:
+            vks[count] = (input.data.keyboard.Flags & RI_KEY_E0 ? VK_RMENU : VK_LMENU);
+            break;
+        case VK_SHIFT:
+            vks[count] = (input.data.keyboard.MakeCode == 0x36 ? VK_RSHIFT : VK_LSHIFT);
+            break;
+        default:
+            vks[count] = input.data.keyboard.VKey;
+            break;
+        }
+        messages[count] = input.data.keyboard.Message;
+        ++count;
+        break;
+    }
+    return count;
 }
 
 struct Window
@@ -125,12 +171,10 @@ struct RawInput
         RegisterRawInputDevices(devices, sizeof(devices) / sizeof(devices[0]), sizeof(devices[0]));
     }
 
-    RAWINPUT get_input(MSG msg)
+    bool get_input(MSG msg, RAWINPUT &input)
     {
-        RAWINPUT input;
         UINT inputSize;
-        GetRawInputData(reinterpret_cast<HRAWINPUT>(msg.lParam), RID_INPUT, &input, &inputSize, sizeof(RAWINPUTHEADER));
-        return input;
+        return GetRawInputData(reinterpret_cast<HRAWINPUT>(msg.lParam), RID_INPUT, &input, &inputSize, sizeof(RAWINPUTHEADER)) != -1;
     }
 };
 
@@ -196,42 +240,6 @@ struct ConsoleOutput
 
 }
 
-struct RawInputState
-{
-    bool mouse1;
-    bool mouse2;
-    bool lshift;
-
-    void process(const RAWINPUT &input)
-    {
-        const auto &mouse = input.data.mouse;
-        const auto &key = input.data.keyboard;
-
-        switch (input.header.dwType) {
-        case RIM_TYPEMOUSE:
-            mouse1 = (mouse.usButtonFlags & RI_MOUSE_BUTTON_1_DOWN) || (mouse.usButtonFlags & RI_MOUSE_BUTTON_1_UP ? false : mouse1);
-            mouse2 = (mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN) || (mouse.usButtonFlags & RI_MOUSE_BUTTON_2_UP ? false : mouse2);
-            break;
-        case RIM_TYPEKEYBOARD:
-            switch (key.VKey) {
-            case VK_SHIFT:
-                if (key.MakeCode == 0x2a) {
-                    lshift = (key.Message == WM_KEYDOWN) || (key.Message == WM_KEYUP ? false : lshift);
-                }
-                break;
-            }
-            break;
-        }
-    }
-
-    void update()
-    {
-        mouse1 = win32::is_key_down(VK_LBUTTON);
-        mouse2 = win32::is_key_down(VK_RBUTTON);
-        lshift = win32::is_key_down(VK_LSHIFT);
-    }
-};
-
 int main(int argc, char *argv[])
 {
     constexpr auto VERSION_STRING = L"1.0.0";
@@ -245,6 +253,7 @@ int main(int argc, char *argv[])
     constexpr auto SPEED_MIN = 100;
     constexpr auto SPEED_MAX = 15000;
 
+    UINT binds[3] = {VK_LBUTTON, VK_RBUTTON, VK_LSHIFT};
     bool active = false;
     int rate = 1000;
     int speed = 5000;
@@ -267,19 +276,20 @@ int main(int argc, char *argv[])
         out.set_cursor_info(info);
     }
 
-    RawInputState input_state;
-    RawInputState last_input_state;
+    bool last_down[3] = {false, false, false};
+    bool down[3] = {false, false, false};
     long long active_check_time = -1;
     double mouse_remaining = 0.0;
     long long mouse_time = -1;
 
-    input_state.update();
     auto current = win32::performance_counter();
     bool quit = false;
     bool redraw = true;
 
     while (true) {
-        last_input_state = input_state;
+        for (size_t i = 0; i < sizeof(binds) / sizeof(binds[0]); ++i) {
+            last_down[i] = down[i];
+        }
         MSG msg;
         while (!quit && window.consume_msg(msg)) {
             switch (msg.message) {
@@ -287,7 +297,21 @@ int main(int argc, char *argv[])
                 quit = true;
                 break;
             case WM_INPUT:
-                input_state.process(raw_input.get_input(msg));
+                RAWINPUT input;
+                if (!raw_input.get_input(msg, input)) {
+                    break;
+                }
+
+                USHORT vks[5];
+                UINT messages[5];
+                auto count = win32::get_raw_input_messages(input, vks, messages, sizeof(vks) / sizeof(vks[0]));
+                for (size_t i = 0; i < count; ++i) {
+                    for (size_t j = 0; j < sizeof(binds) / sizeof(binds[0]); ++j) {
+                        if (binds[j] == vks[i]) {
+                            down[j] = (messages[i] == WM_KEYDOWN) || (messages[i] == WM_KEYUP ? false : down[j]);
+                        }
+                    }
+                }
                 break;
             }
 
@@ -363,11 +387,7 @@ int main(int argc, char *argv[])
             }
         }
 
-        if (changed_to_active) {
-            input_state.update();
-        }
-
-        if (changed_to_active || (last_input_state.mouse1 ^ input_state.mouse1) || (last_input_state.mouse2 ^ input_state.mouse2)) {
+        if (changed_to_active || (last_down[0] ^ down[0]) || (last_down[1] ^ down[1])) {
             mouse_time = current;
             mouse_remaining = 0.0;
         }
@@ -380,11 +400,8 @@ int main(int argc, char *argv[])
         }
         current = win32::performance_counter();
 
-        if (active && input_state.mouse1 ^ input_state.mouse2 && current - mouse_time >= frequency * (1.0 / rate)) {
-            mouse_remaining +=
-                (int(input_state.mouse1) * -1 + int(input_state.mouse2)) *
-                (speed * (input_state.lshift ? SLOWDOWN_FACTOR : 1.0)) *
-                (current - mouse_time) / frequency;
+        if (active && down[0] ^ down[1] && current - mouse_time >= frequency * (1.0 / rate)) {
+            mouse_remaining += (int(down[0]) * -1 + int(down[1])) * (speed * (down[2] ? SLOWDOWN_FACTOR : 1.0)) * (current - mouse_time) / frequency;
             auto amount = static_cast<long long>(mouse_remaining);
             win32::move_mouse_by(amount, 0);
             mouse_remaining -= amount;
