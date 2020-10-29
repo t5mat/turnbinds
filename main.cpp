@@ -240,21 +240,21 @@ struct RawInputState
 int main(int argc, char *argv[])
 {
     constexpr auto VERSION_STRING = L"1.0.0";
-    constexpr auto SLEEP_INTERVAL_HNS = 2500.0;
+    constexpr auto SLEEP_INTERVAL_HNS = 2500;
     constexpr auto ACTIVE_CHECK_INTERVAL = 1.0 / 20.0;
     constexpr auto DOUBLE_TAP_INTERVAL = 500.0 / 1000.0;
     constexpr auto SLOWDOWN_FACTOR = 2.0 / 3.0;
     constexpr auto RATE_INCREASE = 50;
     constexpr auto RATE_MIN = 50;
-    constexpr auto RATE_MAX = 1200;
+    constexpr auto RATE_MAX = 2000;
     constexpr auto SPEED_INCREASE = 100;
     constexpr auto SPEED_MIN = 100;
-    constexpr auto SPEED_MAX = 10000;
+    constexpr auto SPEED_MAX = 15000;
 
     bool active = false;
     bool enabled = true;
     int rate = 1000;
-    int speed = 3000;
+    int speed = 5000;
 
     auto frequency = win32::performance_counter_frequency();
     win32::Window window(L"turnbinds", L"turnbinds");
