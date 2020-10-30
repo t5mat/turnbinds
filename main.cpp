@@ -276,7 +276,7 @@ struct ConsoleOutput
 
 int main(int argc, char *argv[])
 {
-    constexpr auto VERSION_STRING = L"1.0.0";
+    constexpr auto VERSION_STRING = L"1.1.0";
     constexpr auto SLEEP_INTERVAL_HNS = 2500;
     constexpr auto ACTIVE_CHECK_INTERVAL = 1.0 / 20.0;
     constexpr auto SLOWDOWN_FACTOR = 2.0 / 3.0;
