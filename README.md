@@ -15,12 +15,7 @@ Use at your own risk!
 - ESC/CTRL+C - quit
 - Up/down arrows (+SHIFT) - change speed
 - Left/right arrows (+SHIFT) - change rate
-
-In-game:
-
-- MOUSE1 - turn left
-- MOUSE2 - turn right
-- +SHIFT - slow down turn
+- R - reconfigure binds
 
 ## Notes
 

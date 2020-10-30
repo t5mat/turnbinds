@@ -59,6 +59,35 @@ CURSORINFO get_mouse_cursor_info()
     return info;
 }
 
+bool get_vk_string(int vk, wchar_t *result, size_t size)
+{
+    UINT scan_code;
+    switch (vk) {
+    case VK_LBUTTON:
+        swprintf(result, size, L"Left Mouse Button");
+        return true;
+    case VK_RBUTTON:
+        swprintf(result, size, L"Right Mouse Button");
+        return true;
+    case VK_MBUTTON:
+        swprintf(result, size, L"Middle Mouse Button");
+        return true;
+    case VK_XBUTTON1:
+        swprintf(result, size, L"X1 Mouse Button");
+        return true;
+    case VK_XBUTTON2:
+        swprintf(result, size, L"X2 Mouse Button");
+        return true;
+    case VK_LEFT: case VK_UP: case VK_RIGHT: case VK_DOWN: case VK_PRIOR: case VK_NEXT: case VK_END: case VK_HOME: case VK_INSERT: case VK_DELETE: case VK_DIVIDE: case VK_NUMLOCK:
+        scan_code = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC) | 0x100;
+        break;
+    default:
+        scan_code = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
+        break;
+    }
+    return GetKeyNameTextW(scan_code << 16, result, size);
+}
+
 size_t get_raw_input_messages(const RAWINPUT &input, USHORT *vks, UINT *messages, size_t size)
 {
     constexpr int MOUSE_DOWN[5] = {RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_2_DOWN, RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_5_DOWN};
@@ -126,6 +155,11 @@ struct Window
         RegisterClassExW(&cls);
 
         hwnd = CreateWindowExW(0, class_name, window_name, 0, 0, 0, 0, 0, NULL, NULL, instance, NULL);
+    }
+
+    static void wait_msg()
+    {
+        WaitMessage();
     }
 
     bool consume_msg(MSG &msg)
@@ -265,7 +299,7 @@ int main(int argc, char *argv[])
     win32::ConsoleInput in(GetStdHandle(STD_INPUT_HANDLE));
 
     win32::set_timer_resolution(1);
-    in.set_mode(ENABLE_WINDOW_INPUT);
+    in.set_mode(ENABLE_WINDOW_INPUT | ENABLE_MOUSE_INPUT);
 
     auto initial_cursor_info = out.get_cursor_info();
     auto initial_cursor_position = out.get_screen_buffer_info().dwCursorPosition;
@@ -282,9 +316,10 @@ int main(int argc, char *argv[])
     double mouse_remaining = 0.0;
     long long mouse_time = -1;
 
-    auto current = win32::performance_counter();
     bool quit = false;
     bool redraw = true;
+    int rebinding = -1;
+    auto current = win32::performance_counter();
 
     while (true) {
         for (size_t i = 0; i < sizeof(binds) / sizeof(binds[0]); ++i) {
@@ -305,13 +340,29 @@ int main(int argc, char *argv[])
                 USHORT vks[5];
                 UINT messages[5];
                 auto count = win32::get_raw_input_messages(input, vks, messages, sizeof(vks) / sizeof(vks[0]));
+
                 for (size_t i = 0; i < count; ++i) {
-                    for (size_t j = 0; j < sizeof(binds) / sizeof(binds[0]); ++j) {
-                        if (binds[j] == vks[i]) {
-                            down[j] = (messages[i] == WM_KEYDOWN) || (messages[i] == WM_KEYUP ? false : down[j]);
+                    if (rebinding == -1) {
+                        for (size_t j = 0; j < sizeof(binds) / sizeof(binds[0]); ++j) {
+                            if (binds[j] == vks[i]) {
+                                down[j] = (messages[i] == WM_KEYDOWN) || (messages[i] == WM_KEYUP ? false : down[j]);
+                            }
                         }
+                    } else if (messages[i] == WM_KEYDOWN) {
+                        binds[rebinding++] = vks[i];
+                        if (rebinding == sizeof(binds) / sizeof(binds[0])) {
+                            rebinding = -1;
+                            for (size_t i = 0; i < sizeof(binds) / sizeof(binds[0]); ++i) {
+                                down[i] = false;
+                            }
+                            active_check_time = -1;
+                            active = false;
+                            current = win32::performance_counter();
+                        }
+                        redraw = true;
                     }
                 }
+
                 break;
             }
 
@@ -323,30 +374,6 @@ int main(int argc, char *argv[])
             switch (input.EventType) {
             case KEY_EVENT:
                 switch (key.wVirtualKeyCode) {
-                case VK_UP:
-                    if (key.bKeyDown) {
-                        speed = std::min(SPEED_MAX, speed + (key.dwControlKeyState & SHIFT_PRESSED ? 1 : SPEED_INCREASE));
-                        redraw = true;
-                    }
-                    break;
-                case VK_DOWN:
-                    if (key.bKeyDown) {
-                        speed = std::max(SPEED_MIN, speed - (key.dwControlKeyState & SHIFT_PRESSED ? 1 : SPEED_INCREASE));
-                        redraw = true;
-                    }
-                    break;
-                case VK_RIGHT:
-                    if (key.bKeyDown) {
-                        rate = std::min(RATE_MAX, rate + (key.dwControlKeyState & SHIFT_PRESSED ? 1 : RATE_INCREASE));
-                        redraw = true;
-                    }
-                    break;
-                case VK_LEFT:
-                    if (key.bKeyDown) {
-                        rate = std::max(RATE_MIN, rate - (key.dwControlKeyState & SHIFT_PRESSED ? 1 : RATE_INCREASE));
-                        redraw = true;
-                    }
-                    break;
                 case 'C':
                     if (key.bKeyDown && key.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) {
                         quit = true;
@@ -355,6 +382,43 @@ int main(int argc, char *argv[])
                 case VK_ESCAPE:
                     if (key.bKeyDown) {
                         quit = true;
+                    }
+                    break;
+                default:
+                    if (rebinding != -1) {
+                        break;
+                    }
+                    switch (key.wVirtualKeyCode) {
+                    case VK_UP:
+                        if (key.bKeyDown) {
+                            speed = std::min(SPEED_MAX, speed + (key.dwControlKeyState & SHIFT_PRESSED ? 1 : SPEED_INCREASE));
+                            redraw = true;
+                        }
+                        break;
+                    case VK_DOWN:
+                        if (key.bKeyDown) {
+                            speed = std::max(SPEED_MIN, speed - (key.dwControlKeyState & SHIFT_PRESSED ? 1 : SPEED_INCREASE));
+                            redraw = true;
+                        }
+                        break;
+                    case VK_RIGHT:
+                        if (key.bKeyDown) {
+                            rate = std::min(RATE_MAX, rate + (key.dwControlKeyState & SHIFT_PRESSED ? 1 : RATE_INCREASE));
+                            redraw = true;
+                        }
+                        break;
+                    case VK_LEFT:
+                        if (key.bKeyDown) {
+                            rate = std::max(RATE_MIN, rate - (key.dwControlKeyState & SHIFT_PRESSED ? 1 : RATE_INCREASE));
+                            redraw = true;
+                        }
+                        break;
+                    case 'R':
+                        if (key.bKeyDown) {
+                            rebinding = 0;
+                            redraw = true;
+                        }
+                        break;
                     }
                     break;
                 }
@@ -373,7 +437,30 @@ int main(int argc, char *argv[])
             out.fill(0, initial_cursor_position, info.dwSize.X * (initial_cursor_position.Y - info.dwCursorPosition.Y + 1) - info.dwCursorPosition.X);
 
             out.set_cursor_position(initial_cursor_position);
-            wprintf(L"\nturnbinds %s\nhttps://github.com/t5mat/turnbinds\n\n[%s]\n* Rate: %dhz\n* Speed: %d\n", VERSION_STRING, active ? L"active" : L"inactive", rate, speed);
+
+            wprintf(L"\nturnbinds %s\nhttps://github.com/t5mat/turnbinds\n\n", VERSION_STRING);
+
+            {
+                constexpr const wchar_t *BIND_NAMES[] = {L"+left", L"+right", L"+speed"};
+
+                size_t count = (rebinding == -1 ? sizeof(binds) / sizeof(binds[0]) : rebinding + 1);
+                for (size_t i = 0; i < count; ++i) {
+                    wchar_t key[128] = L"?";
+                    if (rebinding == -1 || i < count - 1) {
+                        win32::get_vk_string(binds[i], key, sizeof(key));
+                    }
+                    wprintf(L"%s = %s\n", BIND_NAMES[i], key);
+                }
+            }
+
+            if (rebinding == -1) {
+                wprintf(L"\n[%s]\n* Rate: %dhz\n* Speed: %d\n", active ? L"active" : L"inactive", rate, speed);
+            }
+        }
+
+        if (rebinding != -1) {
+            window.wait_msg();
+            continue;
         }
 
         bool changed_to_active = false;
