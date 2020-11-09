@@ -207,8 +207,8 @@ struct RawInput
 
     bool get_input(MSG msg, RAWINPUT &input)
     {
-        UINT inputSize;
-        return GetRawInputData(reinterpret_cast<HRAWINPUT>(msg.lParam), RID_INPUT, &input, &inputSize, sizeof(RAWINPUTHEADER)) != -1;
+        UINT size;
+        return GetRawInputData(reinterpret_cast<HRAWINPUT>(msg.lParam), RID_INPUT, &input, &size, sizeof(RAWINPUTHEADER)) != -1;
     }
 };
 
