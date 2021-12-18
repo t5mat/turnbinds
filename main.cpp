@@ -365,7 +365,6 @@ int main(int argc, char *argv[])
 
                 break;
             }
-
         }
 
         INPUT_RECORD input;
