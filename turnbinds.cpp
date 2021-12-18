@@ -347,6 +347,12 @@ struct ConsoleOutput :
         FillConsoleOutputCharacterW(handle, c, count, position, &written);
     }
 
+    void fill_attribute(WORD attribute, COORD position, size_t count)
+    {
+        DWORD written;
+        FillConsoleOutputAttribute(handle, attribute, count, position, &written);
+    }
+
     void write(const wchar_t *s, size_t count)
     {
         WriteConsoleW(handle, s, count, nullptr, nullptr);
@@ -1013,6 +1019,8 @@ private:
             info.bVisible = false;
             out.set_cursor_info(info);
         }
+
+        out.fill_attribute(0, {0, 0}, info.dwSize.X * info.dwSize.Y);
 
         out.set_cursor_position(info.dwCursorPosition = {0, 0});
         out.fill(L' ', info.dwCursorPosition, info.dwSize.X - info.dwCursorPosition.X);
