@@ -1265,6 +1265,7 @@ struct App
 
     static void run()
     {
+        SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
         win32::set_timer_resolution(1);
 
         hwnd = win32::create_window(g_version_info.name, g_version_info.name, window_proc);
