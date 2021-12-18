@@ -528,6 +528,7 @@ struct State
     ConsoleItem selected;
 
     void on_settings_loaded();
+    void on_enabled_changed();
     void on_cycle_vars_changed();
     void on_raw_input_changed();
     void on_current_changed();
@@ -1220,11 +1221,11 @@ struct TrayIcon
         data.uFlags = NIF_ICON | NIF_TIP | NIF_SHOWTIP | NIF_MESSAGE;
         data.uCallbackMessage = WINDOW_MSG;
         data.hIcon = static_cast<HICON>(::LoadImageW(GetModuleHandle(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
-        wcscpy(data.szTip, g_version_info.title);
     }
 
     void show()
     {
+        GetConsoleTitleW(data.szTip, std::size(data.szTip));
         Shell_NotifyIconW(NIM_ADD, &data);
         Shell_NotifyIconW(NIM_SETVERSION, &data);
     }
@@ -1232,6 +1233,12 @@ struct TrayIcon
     void hide()
     {
         Shell_NotifyIconW(NIM_DELETE, &data);
+    }
+
+    void refresh()
+    {
+        GetConsoleTitleW(data.szTip, std::size(data.szTip));
+        Shell_NotifyIconW(NIM_MODIFY, &data);
     }
 
     bool handle_msg(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -1419,6 +1426,13 @@ struct App
         SetEvent(event);
     }
 
+    static void update_title()
+    {
+        wchar_t buffer[128];
+        swprintf(buffer, std::size(buffer), L"%s%s", g_version_info.title, (g_state.enabled ? L"" : L" (disabled)"));
+        SetConsoleTitleW(buffer);
+    }
+
     static LRESULT CALLBACK window_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     {
         switch (uMsg) {
@@ -1436,6 +1450,7 @@ struct App
                     break;
                 case WindowCommand::ENABLED:
                     g_state.enabled = !g_state.enabled;
+                    g_state.on_enabled_changed();
                     break;
                 case WindowCommand::EXIT:
                     PostMessageW(hwnd, WM_QUIT, 0, 0);
@@ -1503,10 +1518,19 @@ void State::on_settings_loaded()
         g_state.selected = static_cast<ConsoleItem>(0);
     }
 
+    App::update_title();
     if (App::tray_icon) {
         App::tray_icon->show();
     }
     App::console->on_settings_loaded();
+}
+
+void State::on_enabled_changed()
+{
+    App::update_title();
+    if (App::tray_icon) {
+        App::tray_icon->refresh();
+    }
 }
 
 void State::on_cycle_vars_changed()
