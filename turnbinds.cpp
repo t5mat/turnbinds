@@ -613,6 +613,11 @@ struct Input
                             continue;
                         }
 
+                        auto scan = MapVirtualKeyW(i, MAPVK_VK_TO_VSC_EX);
+                        if (scan != 0 && i != MapVirtualKeyW(scan, MAPVK_VSC_TO_VK_EX)) {
+                            continue;
+                        }
+
                         capturing = false;
                         captured = i;
                         break;
