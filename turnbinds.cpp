@@ -417,6 +417,13 @@ enum class Bind
     COUNT
 };
 
+enum class Var
+{
+    RATE,
+    SLEEP,
+    COUNT
+};
+
 enum class CycleVar
 {
     YAWSPEED,
@@ -443,6 +450,8 @@ enum class ConsoleItem
     CL_ANGLESPEEDKEY,
     M_YAW,
     RAW_INPUT,
+    RATE,
+    SLEEP,
     COUNT
 };
 
@@ -451,6 +460,7 @@ enum class ConsoleItemType
     BIND,
     CYCLE_VAR,
     SWITCH,
+    VAR,
     COUNT
 };
 
@@ -469,6 +479,9 @@ static constexpr auto console_item_type(ConsoleItem item)
         return ConsoleItemType::CYCLE_VAR;
     case ConsoleItem::RAW_INPUT:
         return ConsoleItemType::SWITCH;
+    case ConsoleItem::RATE:
+    case ConsoleItem::SLEEP:
+        return ConsoleItemType::VAR;
     default:
         return ConsoleItemType::COUNT;
     }
@@ -477,6 +490,19 @@ static constexpr auto console_item_type(ConsoleItem item)
 static constexpr auto is_developer_console_item(ConsoleItem item)
 {
     switch (item) {
+    case ConsoleItem::RAW_INPUT:
+    case ConsoleItem::RATE:
+    case ConsoleItem::SLEEP:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static constexpr auto is_line_break_console_item(ConsoleItem item)
+{
+    switch (item) {
+    case ConsoleItem::CL_YAWSPEED:
     case ConsoleItem::RAW_INPUT:
         return true;
     default:
@@ -497,6 +523,18 @@ static constexpr auto to_bind(ConsoleItem item)
         return Bind::CYCLE;
     default:
         return Bind::COUNT;
+    }
+}
+
+static constexpr auto to_var(ConsoleItem item)
+{
+    switch (item) {
+    case ConsoleItem::RATE:
+        return Var::RATE;
+    case ConsoleItem::SLEEP:
+        return Var::SLEEP;
+    default:
+        return Var::COUNT;
     }
 }
 
@@ -530,16 +568,17 @@ struct State
 {
     bool developer;
     bool enabled;
-    double sleep;
-    double rate;
 
     UINT binds[*Bind::COUNT];
+    std::optional<double> vars[*Var::COUNT];
     std::vector<double> cycle_vars[*CycleVar::COUNT];
     bool switches[*Switch::COUNT];
     int current;
 
+    bool valid;
     int count;
 
+    wchar_t vars_text[*Var::COUNT][128];
     wchar_t cycle_vars_text[*CycleVar::COUNT][128];
     ConsoleItem selected;
 
@@ -550,11 +589,14 @@ struct State
     void on_restored();
     void on_developer_changed();
     void on_enabled_changed();
+    void on_var_changed(Var var);
     void on_cycle_vars_changed();
     void on_raw_input_changed();
     void on_current_changed();
     void on_selected_changed(ConsoleItem prev);
 
+    void update_valid();
+    void parse_var(Var var);
     void parse_cycle_vars();
 } g_state;
 
@@ -772,7 +814,7 @@ struct BindHandler
             last_down[i] = input.down[g_state.binds[i]];
         }
 
-        if ((input.down[g_state.binds[*Bind::LEFT]] ^ input.down[g_state.binds[*Bind::RIGHT]]) && time - last_time >= win32::PERFORMANCE_COUNTER_FREQUENCY * (1.0 / g_state.rate)) {
+        if ((input.down[g_state.binds[*Bind::LEFT]] ^ input.down[g_state.binds[*Bind::RIGHT]]) && time - last_time >= win32::PERFORMANCE_COUNTER_FREQUENCY * (1.0 / *g_state.vars[*Var::RATE])) {
             double cycle_vars[*CycleVar::COUNT];
             for (int i = 0; i < std::size(cycle_vars); ++i) {
                 cycle_vars[i] = g_state.cycle_vars[i][g_state.current % g_state.cycle_vars[i].size()];
@@ -980,13 +1022,26 @@ struct Console
 
                                 count = 0;
                                 break;
+                            case ConsoleItemType::VAR:
+                                editing = true;
+
+                                read_input_value(g_state.selected);
+
+                                editing = false;
+
+                                g_state.on_var_changed(to_var(g_state.selected));
+                                redraw_full();
+                                break;
                             case ConsoleItemType::CYCLE_VAR:
                                 editing = true;
 
-                                redraw_item_value(ConsoleItem::CL_YAWSPEED);
-                                redraw_item_value(ConsoleItem::SENSITIVITY);
-                                redraw_item_value(ConsoleItem::CL_ANGLESPEEDKEY);
-                                redraw_item_value(ConsoleItem::M_YAW);
+                                for (int i = 0; i < *ConsoleItem::COUNT; ++i) {
+                                    switch (console_item_type(static_cast<ConsoleItem>(i))) {
+                                    case ConsoleItemType::CYCLE_VAR:
+                                        redraw_item_value(static_cast<ConsoleItem>(i));
+                                        break;
+                                    }
+                                }
 
                                 read_input_value(g_state.selected);
 
@@ -1034,11 +1089,13 @@ private:
         L"sensitivity",
         L"cl_anglespeedkey",
         L"m_yaw",
-        L"raw input"
+        L"raw input",
+        L"rate",
+        L"sleep"
     };
     static constexpr const wchar_t *SELECTOR[] = {L"   ", L" » "};
     static constexpr SHORT BUFFER_WIDTH = 64;
-    static constexpr SHORT BUFFER_HEIGHT[] = {15, 17};
+    static constexpr SHORT BUFFER_HEIGHT[] = {15, 19};
     static constexpr auto INPUT_PADDING = 18;
 
     DWORD initial_in_mode;
@@ -1079,14 +1136,24 @@ private:
 
         out.set_cursor_position(positions_value[*item]);
 
-        auto cycle_var = to_cycle_var(item);
+        wchar_t *text;
+        size_t count;
+        switch (console_item_type(item)) {
+        case ConsoleItemType::VAR:
+            text = g_state.vars_text[*to_var(item)];
+            count = std::size(g_state.vars_text[0]);
+            break;
+        case ConsoleItemType::CYCLE_VAR:
+            text = g_state.cycle_vars_text[*to_cycle_var(item)];
+            count = std::size(g_state.cycle_vars_text[0]);
+            break;
+        }
 
-        in.write_text(g_state.cycle_vars_text[*cycle_var]);
+        in.write_text(text);
 
-        auto count = std::size(g_state.cycle_vars_text[0]);
         wchar_t buffer[count];
         in.read_text(buffer, count);
-        wcscpy(g_state.cycle_vars_text[*cycle_var], wcsstrip(buffer));
+        wcscpy(text, wcsstrip(buffer));
 
         out.set_cursor_info(prev_cursor_info);
         in.set_mode(prev_in_mode);
@@ -1123,7 +1190,7 @@ private:
 
             out.set_cursor_position(info.dwCursorPosition = {0, static_cast<SHORT>(info.dwCursorPosition.Y + 1)});
 
-            if (i == *ConsoleItem::CL_YAWSPEED || i == *ConsoleItem::RAW_INPUT) {
+            if (is_line_break_console_item(static_cast<ConsoleItem>(i))) {
                 out.fill(L' ', info.dwCursorPosition, info.dwSize.X - info.dwCursorPosition.X);
                 out.set_cursor_position(info.dwCursorPosition = {0, static_cast<SHORT>(info.dwCursorPosition.Y + 1)});
             }
@@ -1131,7 +1198,15 @@ private:
             positions_selector[i] = info.dwCursorPosition;
             out.write_text_info(SELECTOR[g_state.selected == static_cast<ConsoleItem>(i)], info);
 
-            bool valid = (type != ConsoleItemType::CYCLE_VAR || g_state.count > 0);
+            bool valid = true;
+            switch (type) {
+            case ConsoleItemType::VAR:
+                valid = (g_state.vars[*to_var(static_cast<ConsoleItem>(i))] != std::nullopt);
+                break;
+            case ConsoleItemType::CYCLE_VAR:
+                valid = (g_state.count > 0);
+                break;
+            }
             if (!valid) {
                 out.set_text_attributes(FOREGROUND_INTENSITY | FOREGROUND_RED);
             }
@@ -1217,6 +1292,16 @@ private:
                 }
 
                 out.write_text_info(buffer, info);
+            }
+            break;
+        case ConsoleItemType::VAR:
+            {
+                if (editing && g_state.selected == item) {
+                    break;
+                }
+
+                auto var = to_var(item);
+                out.write_text_info(g_state.vars_text[*var], info);
             }
             break;
         case ConsoleItemType::CYCLE_VAR:
@@ -1368,21 +1453,12 @@ struct Settings
     {
         g_state.developer = (GetPrivateProfileIntW(g_version_info.name, L"developer", 0, path) == 1);
         g_state.enabled = (GetPrivateProfileIntW(g_version_info.name, L"enabled", 1, path) == 1);
-
-        g_state.sleep = win32::GetPrivateProfileDoubleW(g_version_info.name, L"sleep", 5000.0, path);
-        if (g_state.sleep < 0) {
-            g_state.sleep = 3500.0;
-        }
-
-        g_state.rate = win32::GetPrivateProfileDoubleW(g_version_info.name, L"rate", 1000.0, path);
-        if (g_state.rate <= 0) {
-            g_state.rate = 1000.0;
-        }
-
         g_state.binds[*Bind::LEFT] = GetPrivateProfileIntW(g_version_info.name, L"bind_left", VK_LBUTTON, path);
         g_state.binds[*Bind::RIGHT] = GetPrivateProfileIntW(g_version_info.name, L"bind_right", VK_RBUTTON, path);
         g_state.binds[*Bind::SPEED] = GetPrivateProfileIntW(g_version_info.name, L"bind_speed", VK_LSHIFT, path);
         g_state.binds[*Bind::CYCLE] = GetPrivateProfileIntW(g_version_info.name, L"bind_cycle", VK_XBUTTON1, path);
+        GetPrivateProfileStringW(g_version_info.name, L"rate", L"1000", g_state.vars_text[*Var::RATE], std::size(g_state.vars_text[*Var::RATE]), path);
+        GetPrivateProfileStringW(g_version_info.name, L"sleep", L"3500", g_state.vars_text[*Var::SLEEP], std::size(g_state.vars_text[*Var::SLEEP]), path);
         GetPrivateProfileStringW(g_version_info.name, L"cl_yawspeed", L"75 120 210", g_state.cycle_vars_text[*CycleVar::YAWSPEED], std::size(g_state.cycle_vars_text[*CycleVar::YAWSPEED]), path);
         GetPrivateProfileStringW(g_version_info.name, L"sensitivity", L"1.0", g_state.cycle_vars_text[*CycleVar::SENSITIVITY], std::size(g_state.cycle_vars_text[*CycleVar::SENSITIVITY]), path);
         GetPrivateProfileStringW(g_version_info.name, L"cl_anglespeedkey", L"0.67", g_state.cycle_vars_text[*CycleVar::ANGLESPEEDKEY], std::size(g_state.cycle_vars_text[*CycleVar::ANGLESPEEDKEY]), path);
@@ -1409,6 +1485,8 @@ struct Settings
         win32::WritePrivateProfileIntW(g_version_info.name, L"bind_right", g_state.binds[*Bind::RIGHT], path);
         win32::WritePrivateProfileIntW(g_version_info.name, L"bind_speed", g_state.binds[*Bind::SPEED], path);
         win32::WritePrivateProfileIntW(g_version_info.name, L"bind_cycle", g_state.binds[*Bind::CYCLE], path);
+        WritePrivateProfileStringW(g_version_info.name, L"rate", g_state.vars_text[*Var::RATE], path);
+        WritePrivateProfileStringW(g_version_info.name, L"sleep", g_state.vars_text[*Var::SLEEP], path);
         WritePrivateProfileStringW(g_version_info.name, L"cl_yawspeed", g_state.cycle_vars_text[*CycleVar::YAWSPEED], path);
         WritePrivateProfileStringW(g_version_info.name, L"sensitivity", g_state.cycle_vars_text[*CycleVar::SENSITIVITY], path);
         WritePrivateProfileStringW(g_version_info.name, L"cl_anglespeedkey", g_state.cycle_vars_text[*CycleVar::ANGLESPEEDKEY], path);
@@ -1476,7 +1554,7 @@ struct App
             console->run(hwnd, *input);
 
             auto last_active = active;
-            active = (!console->editing && g_state.enabled && g_state.count > 0 && !cursor_visible);
+            active = (!console->editing && g_state.enabled && g_state.valid && !cursor_visible);
 
             if (!active) {
                 if (last_active) {
@@ -1494,7 +1572,7 @@ struct App
             }
 
             bind_handler.run(*input);
-            win32::delay_execution_by(g_state.sleep);
+            win32::delay_execution_by(*g_state.vars[*Var::SLEEP]);
         } while (true);
 
         if (tray_icon) {
@@ -1585,10 +1663,17 @@ private:
 
 void State::on_settings_loaded()
 {
+    for (int i = 0; i < *Var::COUNT; ++i) {
+        parse_var(static_cast<Var>(i));
+    }
+
     parse_cycle_vars();
     if (g_state.count > 0 && (g_state.current < 0 || g_state.current > g_state.count - 1)) {
         g_state.current = 0;
     }
+
+    update_valid();
+
     if (*g_state.selected < 0 || g_state.selected > ConsoleItem::COUNT) {
         g_state.selected = static_cast<ConsoleItem>(0);
     }
@@ -1629,6 +1714,12 @@ void State::on_enabled_changed()
     }
 }
 
+void State::on_var_changed(Var var)
+{
+    parse_var(var);
+    update_valid();
+}
+
 void State::on_cycle_vars_changed()
 {
     auto prev_count = g_state.count;
@@ -1636,6 +1727,8 @@ void State::on_cycle_vars_changed()
     if (g_state.count != prev_count) {
         g_state.current = 0;
     }
+
+    update_valid();
 }
 
 void State::on_raw_input_changed()
@@ -1652,6 +1745,27 @@ void State::on_current_changed()
 void State::on_selected_changed(ConsoleItem prev)
 {
     App::console->on_selected_changed(prev);
+}
+
+void State::update_valid()
+{
+    g_state.valid = (g_state.count > 0);
+    for (int i = 0; (i < *Var::COUNT) && (g_state.valid); ++i) {
+        g_state.valid = (g_state.valid && g_state.vars[i]);
+    }
+}
+
+void State::parse_var(Var var)
+{
+    double d;
+    auto p = parse_double(g_state.vars_text[*var], d);
+
+    if (std::isnan(d) || d < 0.0 || *p != L'\0') {
+        g_state.vars[*var] = std::nullopt;
+        return;
+    }
+
+    g_state.vars[*var] = d;
 }
 
 void State::parse_cycle_vars()
