@@ -435,6 +435,7 @@ enum class CycleVar
 
 enum class Switch
 {
+    ENABLED,
     RAW_INPUT,
     COUNT
 };
@@ -449,6 +450,7 @@ enum class ConsoleItem
     SENSITIVITY,
     CL_ANGLESPEEDKEY,
     M_YAW,
+    ENABLED,
     RAW_INPUT,
     RATE,
     SLEEP,
@@ -477,6 +479,7 @@ static constexpr auto console_item_type(ConsoleItem item)
     case ConsoleItem::CL_ANGLESPEEDKEY:
     case ConsoleItem::M_YAW:
         return ConsoleItemType::CYCLE_VAR;
+    case ConsoleItem::ENABLED:
     case ConsoleItem::RAW_INPUT:
         return ConsoleItemType::SWITCH;
     case ConsoleItem::RATE:
@@ -503,6 +506,7 @@ static constexpr auto is_line_break_console_item(ConsoleItem item)
 {
     switch (item) {
     case ConsoleItem::CL_YAWSPEED:
+    case ConsoleItem::ENABLED:
     case ConsoleItem::RAW_INPUT:
         return true;
     default:
@@ -557,6 +561,8 @@ static constexpr auto to_cycle_var(ConsoleItem item)
 static constexpr auto to_switch(ConsoleItem item)
 {
     switch (item) {
+    case ConsoleItem::ENABLED:
+        return Switch::ENABLED;
     case ConsoleItem::RAW_INPUT:
         return Switch::RAW_INPUT;
     default:
@@ -567,7 +573,6 @@ static constexpr auto to_switch(ConsoleItem item)
 struct State
 {
     bool developer;
-    bool enabled;
 
     UINT binds[*Bind::COUNT];
     std::optional<double> vars[*Var::COUNT];
@@ -588,10 +593,9 @@ struct State
     void on_settings_save();
     void on_restored();
     void on_developer_changed();
-    void on_enabled_changed();
     void on_var_changed(Var var);
     void on_cycle_vars_changed();
-    void on_raw_input_changed();
+    void on_switch_changed(Switch switch_);
     void on_current_changed();
     void on_selected_changed(ConsoleItem prev);
 
@@ -650,17 +654,21 @@ struct Input
         }
     }
 
-    void on_raw_input_changed()
+    void on_switch_changed(Switch switch_)
     {
-        if (!g_state.switches[*Switch::RAW_INPUT] && raw_input > 0) {
-            raw_input = 0;
-            disable_raw_input();
-        }
-        if (capturing) {
-            start_capturing();
-        }
-        if (binds) {
-            enable_binds();
+        switch (switch_) {
+        case Switch::RAW_INPUT:
+            if (!g_state.switches[*switch_] && raw_input > 0) {
+                raw_input = 0;
+                disable_raw_input();
+            }
+            if (capturing) {
+                start_capturing();
+            }
+            if (binds) {
+                enable_binds();
+            }
+            break;
         }
     }
 
@@ -930,14 +938,17 @@ struct Console
         resize();
     }
 
-    void on_enabled_changed()
+    void on_switch_changed(Switch switch_)
     {
-        reset_title();
-    }
-
-    void on_raw_input_changed()
-    {
-        redraw_item_value(ConsoleItem::RAW_INPUT);
+        switch (switch_) {
+        case Switch::ENABLED:
+            reset_title();
+            redraw_item_value(ConsoleItem::ENABLED);
+            break;
+        case Switch::RAW_INPUT:
+            redraw_item_value(ConsoleItem::RAW_INPUT);
+            break;
+        }
     }
 
     void on_current_changed()
@@ -1006,8 +1017,11 @@ struct Console
                                 }
                                 break;
                             case ConsoleItemType::SWITCH:
-                                g_state.switches[*to_switch(g_state.selected)] = right;
-                                g_state.on_raw_input_changed();
+                                {
+                                    auto switch_ = to_switch(g_state.selected);
+                                    g_state.switches[*switch_] = right;
+                                    g_state.on_switch_changed(switch_);
+                                }
                                 break;
                             }
                         }
@@ -1089,13 +1103,14 @@ private:
         L"sensitivity",
         L"cl_anglespeedkey",
         L"m_yaw",
+        L"enabled",
         L"raw input",
         L"rate",
         L"sleep"
     };
     static constexpr const wchar_t *SELECTOR[] = {L"   ", L" » "};
     static constexpr SHORT BUFFER_WIDTH = 64;
-    static constexpr SHORT BUFFER_HEIGHT[] = {15, 19};
+    static constexpr SHORT BUFFER_HEIGHT[] = {17, 21};
     static constexpr auto INPUT_PADDING = 18;
 
     DWORD initial_in_mode;
@@ -1106,7 +1121,7 @@ private:
     void reset_title()
     {
         wchar_t buffer[128];
-        swprintf(buffer, std::size(buffer), L"%s%s", g_version_info.title, (g_state.enabled ? L"" : L" (disabled)"));
+        swprintf(buffer, std::size(buffer), L"%s%s", g_version_info.title, (g_state.switches[*Switch::ENABLED] ? L"" : L" (disabled)"));
         SetConsoleTitleW(buffer);
     }
 
@@ -1393,10 +1408,14 @@ struct TrayIcon
         Shell_NotifyIconW(NIM_DELETE, &data);
     }
 
-    void refresh()
+    void on_switch_changed(Switch switch_)
     {
-        GetConsoleTitleW(data.szTip, std::size(data.szTip));
-        Shell_NotifyIconW(NIM_MODIFY, &data);
+        switch (switch_) {
+        case Switch::ENABLED:
+            GetConsoleTitleW(data.szTip, std::size(data.szTip));
+            Shell_NotifyIconW(NIM_MODIFY, &data);
+            break;
+        }
     }
 
     bool handle_msg(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -1417,7 +1436,7 @@ struct TrayIcon
         case WM_CONTEXTMENU:
             {
                 auto menu = CreatePopupMenu();
-                AppendMenuW(menu, (g_state.enabled ? MF_CHECKED : MF_UNCHECKED), *WindowCommand::ENABLED, L"Enabled");
+                AppendMenuW(menu, (g_state.switches[*Switch::ENABLED] ? MF_CHECKED : MF_UNCHECKED), *WindowCommand::ENABLED, L"Enabled");
                 AppendMenuW(menu, MF_STRING, *WindowCommand::EXIT, L"Exit");
 
                 POINT point;
@@ -1452,7 +1471,6 @@ struct Settings
     void load()
     {
         g_state.developer = (GetPrivateProfileIntW(g_version_info.name, L"developer", 0, path) == 1);
-        g_state.enabled = (GetPrivateProfileIntW(g_version_info.name, L"enabled", 1, path) == 1);
         g_state.binds[*Bind::LEFT] = GetPrivateProfileIntW(g_version_info.name, L"bind_left", VK_LBUTTON, path);
         g_state.binds[*Bind::RIGHT] = GetPrivateProfileIntW(g_version_info.name, L"bind_right", VK_RBUTTON, path);
         g_state.binds[*Bind::SPEED] = GetPrivateProfileIntW(g_version_info.name, L"bind_speed", VK_LSHIFT, path);
@@ -1463,6 +1481,7 @@ struct Settings
         GetPrivateProfileStringW(g_version_info.name, L"sensitivity", L"1.0", g_state.cycle_vars_text[*CycleVar::SENSITIVITY], std::size(g_state.cycle_vars_text[*CycleVar::SENSITIVITY]), path);
         GetPrivateProfileStringW(g_version_info.name, L"cl_anglespeedkey", L"0.67", g_state.cycle_vars_text[*CycleVar::ANGLESPEEDKEY], std::size(g_state.cycle_vars_text[*CycleVar::ANGLESPEEDKEY]), path);
         GetPrivateProfileStringW(g_version_info.name, L"m_yaw", L"0.022", g_state.cycle_vars_text[*CycleVar::YAW], std::size(g_state.cycle_vars_text[*CycleVar::YAW]), path);
+        g_state.switches[*Switch::ENABLED] = (GetPrivateProfileIntW(g_version_info.name, L"enabled", 1, path) == 1);
         g_state.switches[*Switch::RAW_INPUT] = (GetPrivateProfileIntW(g_version_info.name, L"raw_input", 0, path) == 1);
         g_state.current = GetPrivateProfileIntW(g_version_info.name, L"current", 0, path);
         g_state.selected = static_cast<ConsoleItem>(GetPrivateProfileIntW(g_version_info.name, L"selected", 0, path));
@@ -1480,7 +1499,6 @@ struct Settings
         g_state.on_settings_save();
 
         win32::WritePrivateProfileIntW(g_version_info.name, L"developer", g_state.developer, path);
-        win32::WritePrivateProfileIntW(g_version_info.name, L"enabled", g_state.enabled, path);
         win32::WritePrivateProfileIntW(g_version_info.name, L"bind_left", g_state.binds[*Bind::LEFT], path);
         win32::WritePrivateProfileIntW(g_version_info.name, L"bind_right", g_state.binds[*Bind::RIGHT], path);
         win32::WritePrivateProfileIntW(g_version_info.name, L"bind_speed", g_state.binds[*Bind::SPEED], path);
@@ -1491,6 +1509,7 @@ struct Settings
         WritePrivateProfileStringW(g_version_info.name, L"sensitivity", g_state.cycle_vars_text[*CycleVar::SENSITIVITY], path);
         WritePrivateProfileStringW(g_version_info.name, L"cl_anglespeedkey", g_state.cycle_vars_text[*CycleVar::ANGLESPEEDKEY], path);
         WritePrivateProfileStringW(g_version_info.name, L"m_yaw", g_state.cycle_vars_text[*CycleVar::YAW], path);
+        win32::WritePrivateProfileIntW(g_version_info.name, L"enabled", g_state.switches[*Switch::ENABLED], path);
         win32::WritePrivateProfileIntW(g_version_info.name, L"raw_input", g_state.switches[*Switch::RAW_INPUT], path);
         win32::WritePrivateProfileIntW(g_version_info.name, L"current", g_state.current, path);
         win32::WritePrivateProfileIntW(g_version_info.name, L"selected", *g_state.selected, path);
@@ -1554,7 +1573,7 @@ struct App
             console->run(hwnd, *input);
 
             auto last_active = active;
-            active = (!console->editing && g_state.enabled && g_state.valid && !cursor_visible);
+            active = (!console->editing && g_state.switches[*Switch::ENABLED] && g_state.valid && !cursor_visible);
 
             if (!active) {
                 if (last_active) {
@@ -1603,8 +1622,8 @@ struct App
                     g_state.on_restored();
                     break;
                 case WindowCommand::ENABLED:
-                    g_state.enabled = !g_state.enabled;
-                    g_state.on_enabled_changed();
+                    g_state.switches[*Switch::ENABLED] = !g_state.switches[*Switch::ENABLED];
+                    g_state.on_switch_changed(Switch::ENABLED);
                     break;
                 case WindowCommand::EXIT:
                     PostMessageW(hwnd, WM_QUIT, 0, 0);
@@ -1706,14 +1725,6 @@ void State::on_developer_changed()
     App::console->on_developer_changed();
 }
 
-void State::on_enabled_changed()
-{
-    App::console->on_enabled_changed();
-    if (App::tray_icon) {
-        App::tray_icon->refresh();
-    }
-}
-
 void State::on_var_changed(Var var)
 {
     parse_var(var);
@@ -1731,10 +1742,13 @@ void State::on_cycle_vars_changed()
     update_valid();
 }
 
-void State::on_raw_input_changed()
+void State::on_switch_changed(Switch switch_)
 {
-    App::input->on_raw_input_changed();
-    App::console->on_raw_input_changed();
+    App::input->on_switch_changed(switch_);
+    App::console->on_switch_changed(switch_);
+    if (App::tray_icon) {
+        App::tray_icon->on_switch_changed(switch_);
+    }
 }
 
 void State::on_current_changed()
