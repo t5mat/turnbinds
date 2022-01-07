@@ -742,7 +742,7 @@ struct BindHandler
 
         auto time = win32::performance_counter();
 
-        if ((last_down[*Bind::LEFT] ^ input.down[g_state.binds[*Bind::LEFT]]) || (last_down[*Bind::RIGHT] ^ input.down[g_state.binds[*Bind::RIGHT]])) {;
+        if ((last_down[*Bind::LEFT] ^ input.down[g_state.binds[*Bind::LEFT]]) || (last_down[*Bind::RIGHT] ^ input.down[g_state.binds[*Bind::RIGHT]])) {
             last_time = time;
             remaining = 0.0;
         }
