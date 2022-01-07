@@ -345,7 +345,12 @@ struct ConsoleOutput :
         return info;
     }
 
-    void set_screen_buffer_size(COORD size)
+    void set_window_info(bool absolute, const SMALL_RECT &window)
+    {
+        SetConsoleWindowInfo(handle, absolute, &window);
+    }
+
+    void set_buffer_size(COORD size)
     {
         SetConsoleScreenBufferSize(handle, size);
     }
@@ -469,6 +474,16 @@ static constexpr auto console_item_type(ConsoleItem item)
     }
 }
 
+static constexpr auto is_developer_console_item(ConsoleItem item)
+{
+    switch (item) {
+    case ConsoleItem::RAW_INPUT:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static constexpr auto to_bind(ConsoleItem item)
 {
     switch (item) {
@@ -513,6 +528,7 @@ static constexpr auto to_switch(ConsoleItem item)
 
 struct State
 {
+    bool developer;
     bool enabled;
     double sleep;
     double rate;
@@ -528,6 +544,7 @@ struct State
     ConsoleItem selected;
 
     void on_settings_loaded();
+    void on_developer_changed();
     void on_enabled_changed();
     void on_cycle_vars_changed();
     void on_raw_input_changed();
@@ -829,15 +846,6 @@ struct Console
     {
         initial_in_mode = in.get_mode();
 
-        SMALL_RECT bounds{0, 0, INITIAL_BUFFER_SIZE.X + 1, INITIAL_BUFFER_SIZE.Y + 1};
-        SetConsoleWindowInfo(out.handle, true, &bounds);
-
-        auto info = out.get_screen_buffer_info();
-        out.set_screen_buffer_size({
-            static_cast<SHORT>(info.srWindow.Right - info.srWindow.Left + 1),
-            static_cast<SHORT>(info.srWindow.Bottom - info.srWindow.Top + 1)
-        });
-
         out.set_mode(ENABLE_PROCESSED_OUTPUT);
         out.set_as_active_screen_buffer();
 
@@ -851,7 +859,12 @@ struct Console
 
     void on_settings_loaded()
     {
-        redraw_full();
+        resize();
+    }
+
+    void on_developer_changed()
+    {
+        resize();
     }
 
     void on_raw_input_changed()
@@ -903,7 +916,11 @@ struct Console
                             bool down = (events[i].Event.KeyEvent.wVirtualKeyCode == VK_DOWN);
                             if (events[i].Event.KeyEvent.bKeyDown) {
                                 auto prev = g_state.selected;
-                                g_state.selected = static_cast<ConsoleItem>((down ? (*g_state.selected + 1) : (*g_state.selected - 1 + *ConsoleItem::COUNT + 1)) % (*ConsoleItem::COUNT + 1));
+
+                                do {
+                                    g_state.selected = static_cast<ConsoleItem>((down ? (*g_state.selected + 1) : (*g_state.selected - 1 + *ConsoleItem::COUNT + 1)) % (*ConsoleItem::COUNT + 1));
+                                } while (!g_state.developer && is_developer_console_item(static_cast<ConsoleItem>(*g_state.selected)));
+
                                 g_state.on_selected_changed(prev);
                             }
                         }
@@ -952,6 +969,10 @@ struct Console
                                 g_state.on_cycle_vars_changed();
                                 redraw_full();
                                 break;
+                            case ConsoleItemType::COUNT:
+                                g_state.developer = !g_state.developer;
+                                g_state.on_developer_changed();
+                                break;
                             }
                         }
                         break;
@@ -990,13 +1011,22 @@ private:
         L"raw input"
     };
     static constexpr const wchar_t *SELECTOR[] = {L"   ", L" » "};
-    static constexpr auto INITIAL_BUFFER_SIZE = COORD{64, 15};
+    static constexpr SHORT BUFFER_WIDTH = 64;
+    static constexpr SHORT BUFFER_HEIGHT[] = {15, 17};
     static constexpr auto INPUT_PADDING = 18;
 
     DWORD initial_in_mode;
 
     COORD positions_selector[*ConsoleItem::COUNT];
     COORD positions_value[*ConsoleItem::COUNT];
+
+    void resize()
+    {
+        SMALL_RECT window{0, 0, BUFFER_WIDTH - 1, static_cast<SHORT>(BUFFER_HEIGHT[g_state.developer] - 1)};
+        out.set_window_info(true, window);
+        out.set_buffer_size({BUFFER_WIDTH, static_cast<SHORT>(BUFFER_HEIGHT[g_state.developer])});
+        out.set_window_info(true, window);
+    }
 
     void read_input_value(ConsoleItem item)
     {
@@ -1051,6 +1081,10 @@ private:
         out.fill(L' ', info.dwCursorPosition, info.dwSize.X - info.dwCursorPosition.X);
 
         for (int i = 0; i < *ConsoleItem::COUNT; ++i) {
+            if (!g_state.developer && is_developer_console_item(static_cast<ConsoleItem>(i))) {
+                continue;
+            }
+
             auto type = console_item_type(static_cast<ConsoleItem>(i));
 
             out.set_cursor_position(info.dwCursorPosition = {0, static_cast<SHORT>(info.dwCursorPosition.Y + 1)});
@@ -1089,8 +1123,8 @@ private:
         {
             out.set_text_attributes(FOREGROUND_RED | FOREGROUND_GREEN);
 
-            wchar_t title[INITIAL_BUFFER_SIZE.X + 1];
-            swprintf(title, INITIAL_BUFFER_SIZE.X + 1, L"%s %s", g_version_info.title, g_version_info.version);
+            wchar_t title[BUFFER_WIDTH + 1];
+            swprintf(title, BUFFER_WIDTH + 1, L"%s %s", g_version_info.title, g_version_info.version);
             swprintf(buffer, buffer_size, L"%*s", info.dwSize.X - 2, title);
 
             out.set_cursor_position(info.dwCursorPosition = {0, static_cast<SHORT>(info.dwCursorPosition.Y + 1)});
@@ -1143,7 +1177,7 @@ private:
 
                 auto bind = to_bind(item);
 
-                wchar_t buffer[INITIAL_BUFFER_SIZE.X + 1];
+                wchar_t buffer[BUFFER_WIDTH + 1];
                 if (!win32::get_vk_string(g_state.binds[*bind], buffer, std::size(buffer))) {
                     buffer[0] = L'\0';
                 }
@@ -1298,6 +1332,7 @@ struct Settings
 
     void load()
     {
+        g_state.developer = (GetPrivateProfileIntW(g_version_info.name, L"developer", 0, path) == 1);
         g_state.enabled = (GetPrivateProfileIntW(g_version_info.name, L"enabled", 1, path) == 1);
 
         g_state.sleep = win32::GetPrivateProfileDoubleW(g_version_info.name, L"sleep", 5000.0, path);
@@ -1327,6 +1362,7 @@ struct Settings
 
     void save()
     {
+        win32::WritePrivateProfileIntW(g_version_info.name, L"developer", g_state.developer, path);
         win32::WritePrivateProfileIntW(g_version_info.name, L"enabled", g_state.enabled, path);
         win32::WritePrivateProfileIntW(g_version_info.name, L"bind_left", g_state.binds[*Bind::LEFT], path);
         win32::WritePrivateProfileIntW(g_version_info.name, L"bind_right", g_state.binds[*Bind::RIGHT], path);
@@ -1522,12 +1558,24 @@ void State::on_settings_loaded()
     if (*g_state.selected < 0 || g_state.selected > ConsoleItem::COUNT) {
         g_state.selected = static_cast<ConsoleItem>(0);
     }
+    while (!g_state.developer && is_developer_console_item(static_cast<ConsoleItem>(*g_state.selected))) {
+        g_state.selected = static_cast<ConsoleItem>((*g_state.selected + 1) % (*ConsoleItem::COUNT + 1));
+    }
 
     App::update_title();
     if (App::tray_icon) {
         App::tray_icon->show();
     }
     App::console->on_settings_loaded();
+}
+
+void State::on_developer_changed()
+{
+    while (!g_state.developer && is_developer_console_item(static_cast<ConsoleItem>(*g_state.selected))) {
+        g_state.selected = static_cast<ConsoleItem>((*g_state.selected + 1) % (*ConsoleItem::COUNT + 1));
+    }
+
+    App::console->on_developer_changed();
 }
 
 void State::on_enabled_changed()
