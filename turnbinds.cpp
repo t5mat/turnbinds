@@ -543,7 +543,11 @@ struct State
     wchar_t cycle_vars_text[*CycleVar::COUNT][128];
     ConsoleItem selected;
 
+    std::optional<WINDOWPLACEMENT> placement;
+
     void on_settings_loaded();
+    void on_settings_save();
+    void on_restored();
     void on_developer_changed();
     void on_enabled_changed();
     void on_cycle_vars_changed();
@@ -836,11 +840,13 @@ private:
 
 struct Console
 {
+    HWND hwnd;
     win32::ConsoleOutput out;
     win32::ConsoleInput in;
     bool editing = false;
 
     Console() :
+        hwnd(GetConsoleWindow()),
         out(CreateConsoleScreenBuffer(GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE | FILE_SHARE_READ, nullptr, CONSOLE_TEXTMODE_BUFFER, nullptr)),
         in(GetStdHandle(STD_INPUT_HANDLE))
     {
@@ -859,12 +865,32 @@ struct Console
 
     void on_settings_loaded()
     {
+        if (g_state.placement) {
+            SetWindowPlacement(hwnd, &(*g_state.placement));
+        }
+        reset_title();
+        resize();
+    }
+
+    void on_settings_save()
+    {
+        g_state.placement = {};
+        GetWindowPlacement(hwnd, &(*g_state.placement));
+    }
+
+    void on_restored()
+    {
         resize();
     }
 
     void on_developer_changed()
     {
         resize();
+    }
+
+    void on_enabled_changed()
+    {
+        reset_title();
     }
 
     void on_raw_input_changed()
@@ -1020,12 +1046,20 @@ private:
     COORD positions_selector[*ConsoleItem::COUNT];
     COORD positions_value[*ConsoleItem::COUNT];
 
+    void reset_title()
+    {
+        wchar_t buffer[128];
+        swprintf(buffer, std::size(buffer), L"%s%s", g_version_info.title, (g_state.enabled ? L"" : L" (disabled)"));
+        SetConsoleTitleW(buffer);
+    }
+
     void resize()
     {
-        SMALL_RECT window{0, 0, BUFFER_WIDTH - 1, static_cast<SHORT>(BUFFER_HEIGHT[g_state.developer] - 1)};
-        out.set_window_info(true, window);
+        out.set_window_info(true, {0, 0, 0, 0});
+        out.set_buffer_size({1, 1});
+        out.set_window_info(true, {0, 0, BUFFER_WIDTH - 1, static_cast<SHORT>(BUFFER_HEIGHT[g_state.developer] - 1)});
         out.set_buffer_size({BUFFER_WIDTH, static_cast<SHORT>(BUFFER_HEIGHT[g_state.developer])});
-        out.set_window_info(true, window);
+        out.set_window_info(true, {0, 0, BUFFER_WIDTH - 1, static_cast<SHORT>(BUFFER_HEIGHT[g_state.developer] - 1)});
     }
 
     void read_input_value(ConsoleItem item)
@@ -1357,11 +1391,18 @@ struct Settings
         g_state.current = GetPrivateProfileIntW(g_version_info.name, L"current", 0, path);
         g_state.selected = static_cast<ConsoleItem>(GetPrivateProfileIntW(g_version_info.name, L"selected", 0, path));
 
+        WINDOWPLACEMENT placement;
+        if (GetPrivateProfileStructW(g_version_info.name, L"placement", &placement, sizeof(placement), path)) {
+            g_state.placement = placement;
+        }
+
         g_state.on_settings_loaded();
     }
 
     void save()
     {
+        g_state.on_settings_save();
+
         win32::WritePrivateProfileIntW(g_version_info.name, L"developer", g_state.developer, path);
         win32::WritePrivateProfileIntW(g_version_info.name, L"enabled", g_state.enabled, path);
         win32::WritePrivateProfileIntW(g_version_info.name, L"bind_left", g_state.binds[*Bind::LEFT], path);
@@ -1375,6 +1416,7 @@ struct Settings
         win32::WritePrivateProfileIntW(g_version_info.name, L"raw_input", g_state.switches[*Switch::RAW_INPUT], path);
         win32::WritePrivateProfileIntW(g_version_info.name, L"current", g_state.current, path);
         win32::WritePrivateProfileIntW(g_version_info.name, L"selected", *g_state.selected, path);
+        WritePrivateProfileStructW(g_version_info.name, L"placement", &(*g_state.placement), sizeof(*g_state.placement), path);
     }
 
 private:
@@ -1393,7 +1435,6 @@ struct App
         win32::set_timer_resolution(1);
 
         hwnd = win32::create_window(g_version_info.name, g_version_info.name, window_proc);
-        console_hwnd = GetConsoleWindow();
 
         SetWinEventHook(EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZESTART, nullptr, event_proc_minimize, 0, 0, WINEVENT_OUTOFCONTEXT);
 
@@ -1402,7 +1443,7 @@ struct App
         console.emplace();
 
         if (win32::get_console_process_count() == 1) {
-            SetWindowLong(console_hwnd, GWL_STYLE, GetWindowLong(console_hwnd, GWL_STYLE) & ~WS_SIZEBOX & ~WS_MAXIMIZEBOX);
+            SetWindowLong(console->hwnd, GWL_STYLE, GetWindowLong(console->hwnd, GWL_STYLE) & ~WS_SIZEBOX & ~WS_MAXIMIZEBOX);
             tray_icon.emplace(hwnd);
         }
 
@@ -1467,13 +1508,6 @@ struct App
         SetEvent(event);
     }
 
-    static void update_title()
-    {
-        wchar_t buffer[128];
-        swprintf(buffer, std::size(buffer), L"%s%s", g_version_info.title, (g_state.enabled ? L"" : L" (disabled)"));
-        SetConsoleTitleW(buffer);
-    }
-
     static LRESULT CALLBACK window_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     {
         switch (uMsg) {
@@ -1486,8 +1520,9 @@ struct App
         case WM_COMMAND:
             switch (static_cast<WindowCommand>(LOWORD(wParam))) {
                 case WindowCommand::RESTORE:
-                    ShowWindow(console_hwnd, SW_RESTORE);
-                    SetForegroundWindow(console_hwnd);
+                    ShowWindow(console->hwnd, SW_RESTORE);
+                    SetForegroundWindow(console->hwnd);
+                    g_state.on_restored();
                     break;
                 case WindowCommand::ENABLED:
                     g_state.enabled = !g_state.enabled;
@@ -1511,7 +1546,7 @@ struct App
     {
         switch (event) {
         case EVENT_SYSTEM_MINIMIZESTART:
-            if (hwnd == console_hwnd) {
+            if (hwnd == console->hwnd) {
                 ShowWindow(hwnd, SW_HIDE);
             }
             break;
@@ -1544,7 +1579,6 @@ struct App
 
 private:
     inline static HWND hwnd;
-    inline static HWND console_hwnd;
     inline static HANDLE event;
     inline static bool cursor_visible;
 };
@@ -1562,11 +1596,20 @@ void State::on_settings_loaded()
         g_state.selected = static_cast<ConsoleItem>((*g_state.selected + 1) % (*ConsoleItem::COUNT + 1));
     }
 
-    App::update_title();
     if (App::tray_icon) {
         App::tray_icon->show();
     }
     App::console->on_settings_loaded();
+}
+
+void State::on_settings_save()
+{
+    App::console->on_settings_save();
+}
+
+void State::on_restored()
+{
+    App::console->on_restored();
 }
 
 void State::on_developer_changed()
@@ -1580,7 +1623,7 @@ void State::on_developer_changed()
 
 void State::on_enabled_changed()
 {
-    App::update_title();
+    App::console->on_enabled_changed();
     if (App::tray_icon) {
         App::tray_icon->refresh();
     }
