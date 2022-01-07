@@ -597,6 +597,7 @@ struct State
     void on_cycle_vars_changed();
     void on_switch_changed(Switch switch_);
     void on_current_changed();
+    void on_valid_updated();
     void on_selected_changed(ConsoleItem prev);
 
     void update_valid();
@@ -959,6 +960,11 @@ struct Console
         redraw_item_value(ConsoleItem::M_YAW);
     }
 
+    void on_valid_updated()
+    {
+        reset_title();
+    }
+
     void on_selected_changed(ConsoleItem prev)
     {
         redraw_selector(prev);
@@ -1121,7 +1127,7 @@ private:
     void reset_title()
     {
         wchar_t buffer[128];
-        swprintf(buffer, std::size(buffer), L"%s%s", g_version_info.title, (g_state.switches[*Switch::ENABLED] ? L"" : L" (disabled)"));
+        swprintf(buffer, std::size(buffer), L"%s%s", g_version_info.title, (!g_state.valid ? L" (error)" : (g_state.switches[*Switch::ENABLED] ? L"" : L" (disabled)")));
         SetConsoleTitleW(buffer);
     }
 
@@ -1412,10 +1418,14 @@ struct TrayIcon
     {
         switch (switch_) {
         case Switch::ENABLED:
-            GetConsoleTitleW(data.szTip, std::size(data.szTip));
-            Shell_NotifyIconW(NIM_MODIFY, &data);
+            refresh();
             break;
         }
+    }
+
+    void on_valid_updated()
+    {
+        refresh();
     }
 
     bool handle_msg(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -1456,6 +1466,12 @@ struct TrayIcon
 
 private:
     static constexpr auto WINDOW_MSG = WM_USER + 0;
+
+    void refresh()
+    {
+        GetConsoleTitleW(data.szTip, std::size(data.szTip));
+        Shell_NotifyIconW(NIM_MODIFY, &data);
+    }
 
     NOTIFYICONDATAW data;
 };
@@ -1756,6 +1772,14 @@ void State::on_current_changed()
     App::console->on_current_changed();
 }
 
+void State::on_valid_updated()
+{
+    App::console->on_valid_updated();
+    if (App::tray_icon) {
+        App::tray_icon->on_valid_updated();
+    }
+}
+
 void State::on_selected_changed(ConsoleItem prev)
 {
     App::console->on_selected_changed(prev);
@@ -1767,6 +1791,7 @@ void State::update_valid()
     for (int i = 0; (i < *Var::COUNT) && (g_state.valid); ++i) {
         g_state.valid = (g_state.valid && g_state.vars[i]);
     }
+    on_valid_updated();
 }
 
 void State::parse_var(Var var)
