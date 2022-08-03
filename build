@@ -8,7 +8,7 @@ CLEAN=${CLEAN:-0}
 docker run --rm -i \
     -u $(id -u):$(id -g) \
     -v $DIR:$DIR:rw \
-    mstorsjo/llvm-mingw:20211002 <<EOF
+    mstorsjo/llvm-mingw:20220323 <<EOF
 
 [ -d $DIR/.build ] || (
     mkdir -p $DIR/.build

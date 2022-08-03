@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.20)
 
 project(turnbinds CXX)
 
@@ -14,6 +14,6 @@ add_executable(turnbinds
     "${CMAKE_CURRENT_LIST_DIR}/turnbinds.cpp"
 )
 
-target_compile_options(turnbinds PRIVATE -std=c++17 -Wall -Werror -Wno-switch)
+target_compile_options(turnbinds PRIVATE -std=c++20 -Wall -Werror -Wno-switch)
 target_link_libraries(turnbinds PRIVATE -static -lversion -lpathcch)
 set_target_properties(turnbinds PROPERTIES LINK_FLAGS_RELEASE -s)
