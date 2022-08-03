@@ -1,4 +1,5 @@
 #include <cmath>
+#include <cwchar>
 #include <array>
 #include <optional>
 #include <vector>
@@ -18,18 +19,18 @@ constexpr std::enable_if_t<std::is_enum<T>::value, std::underlying_type_t<T>> op
 
 wchar_t *wcsstrip(wchar_t *s)
 {
-    size_t size = wcslen(s);
-    if (size == 0) {
+    auto count = std::wcslen(s);
+    if (count == 0) {
         return s;
     }
 
-    wchar_t *end = s + size - 1;
-    while (end >= s && isspace(*end)) {
+    auto end = s + count - 1;
+    while (end >= s && std::isspace(*end)) {
         end--;
     }
     *(end + 1) = L'\0';
 
-    while ((*s != L'\0') && isspace(*s)) {
+    while ((*s != L'\0') && std::isspace(*s)) {
         s++;
     }
 
@@ -39,16 +40,18 @@ wchar_t *wcsstrip(wchar_t *s)
 const wchar_t *parse_double(const wchar_t *s, double &value)
 {
     wchar_t *end;
-    value = wcstod(s, &end);
+    value = std::wcstod(s, &end);
     if (end == s) {
         value = NAN;
     }
+
     while (*end != L'\0') {
-        if (!isspace(*end)) {
+        if (!std::isspace(*end)) {
             break;
         }
         ++end;
     }
+
     return end;
 }
 
@@ -57,9 +60,9 @@ namespace win32 {
 namespace {
 
 using ZwSetTimerResolution_t = NTSTATUS (WINAPI *)(IN ULONG RequestedResolution, IN BOOLEAN Set, OUT PULONG ActualResolution);
-using NtDelayExecution_t = NTSTATUS (WINAPI *)(IN BOOL Alertable, IN PLARGE_INTEGER DelayInterval);
-
 auto ZwSetTimerResolution = reinterpret_cast<ZwSetTimerResolution_t>(GetProcAddress(LoadLibraryW(L"ntdll.dll"), "ZwSetTimerResolution"));
+
+using NtDelayExecution_t = NTSTATUS (WINAPI *)(IN BOOL Alertable, IN PLARGE_INTEGER DelayInterval);
 auto NtDelayExecution = reinterpret_cast<NtDelayExecution_t>(GetProcAddress(LoadLibraryW(L"ntdll.dll"), "NtDelayExecution"));
 
 long long performance_counter_frequency()
@@ -92,7 +95,7 @@ double GetPrivateProfileDoubleW(LPCWSTR lpAppName, LPCWSTR lpKeyName, double dbl
 void WritePrivateProfileIntW(LPCWSTR lpAppName, LPCWSTR lpKeyName, int nInt, LPCWSTR lpFileName)
 {
     wchar_t buffer[128];
-    swprintf(buffer, std::size(buffer), L"%d", nInt);
+    std::swprintf(buffer, std::size(buffer), L"%d", nInt);
     WritePrivateProfileStringW(lpAppName, lpKeyName, buffer, lpFileName);
 }
 
@@ -139,19 +142,19 @@ bool get_vk_string(int vk, wchar_t *result, size_t count)
     UINT scan_code;
     switch (vk) {
     case VK_LBUTTON:
-        swprintf(result, count, L"Left Mouse Button");
+        std::swprintf(result, count, L"Left Mouse Button");
         return true;
     case VK_RBUTTON:
-        swprintf(result, count, L"Right Mouse Button");
+        std::swprintf(result, count, L"Right Mouse Button");
         return true;
     case VK_MBUTTON:
-        swprintf(result, count, L"Middle Mouse Button");
+        std::swprintf(result, count, L"Middle Mouse Button");
         return true;
     case VK_XBUTTON1:
-        swprintf(result, count, L"X1 Mouse Button");
+        std::swprintf(result, count, L"X1 Mouse Button");
         return true;
     case VK_XBUTTON2:
-        swprintf(result, count, L"X2 Mouse Button");
+        std::swprintf(result, count, L"X2 Mouse Button");
         return true;
     case VK_LEFT: case VK_UP: case VK_RIGHT: case VK_DOWN: case VK_PRIOR: case VK_NEXT: case VK_END: case VK_HOME: case VK_INSERT: case VK_DELETE: case VK_DIVIDE: case VK_NUMLOCK:
         scan_code = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC) | 0x100;
@@ -280,7 +283,7 @@ struct ConsoleInput :
 
     void write_text(const wchar_t *s)
     {
-        size_t count = wcslen(s);
+        auto count = std::wcslen(s);
         INPUT_RECORD records[count];
         for (int i = 0; i < count; ++i) {
             records[i].EventType = KEY_EVENT;
@@ -301,7 +304,7 @@ struct ConsoleInput :
         DWORD read;
         ReadConsoleW(handle, buffer, count, &read, nullptr);
 
-        if (buffer[read - 1] == '\n') {
+        if (buffer[read - 1] == L'\n') {
             buffer[read - 2] = L'\0';
             return;
         }
@@ -311,7 +314,7 @@ struct ConsoleInput :
         wchar_t rest[1024];
         do {
             ReadConsoleW(handle, rest, std::size(rest), &read, nullptr);
-        } while (rest[read - 1] != '\n');
+        } while (rest[read - 1] != L'\n');
     }
 };
 
@@ -384,7 +387,7 @@ struct ConsoleOutput :
 
     void write_text(const wchar_t *s)
     {
-        WriteConsoleW(handle, s, wcslen(s), nullptr, nullptr);
+        WriteConsoleW(handle, s, std::wcslen(s), nullptr, nullptr);
     }
 
     void write_info(const wchar_t *s, size_t count, CONSOLE_SCREEN_BUFFER_INFOEX &info)
@@ -396,7 +399,7 @@ struct ConsoleOutput :
 
     void write_text_info(const wchar_t *s, CONSOLE_SCREEN_BUFFER_INFOEX &info)
     {
-        size_t count = std::min(wcslen(s), size_t(info.dwSize.X - info.dwCursorPosition.X));
+        size_t count = std::min(std::wcslen(s), size_t(info.dwSize.X - info.dwCursorPosition.X));
         WriteConsoleW(handle, s, count, nullptr, nullptr);
         info.dwCursorPosition.X += count;
     }
@@ -678,7 +681,7 @@ struct Input
         if (!g_state.switches[*Switch::RAW_INPUT]) {
             if (capturing) {
                 for (int i = 0; i < std::size(down); ++i) {
-                    bool last = down[i];
+                    auto last = down[i];
                     down[i] = win32::is_key_down(i);
                     if (!last && down[i]) {
                         if (i == VK_ESCAPE || i == VK_RETURN) {
@@ -780,7 +783,7 @@ private:
         devices[1].usUsage = HID_USAGE_GENERIC_KEYBOARD;
         devices[1].dwFlags = RIDEV_INPUTSINK | RIDEV_NOLEGACY;
         devices[1].hwndTarget = hwnd;
-        RegisterRawInputDevices(devices, std::size(devices), sizeof(devices[0]));
+        RegisterRawInputDevices(devices, std::size(devices), sizeof(*devices));
     }
 
     void disable_raw_input()
@@ -794,7 +797,7 @@ private:
         devices[1].usUsage = HID_USAGE_GENERIC_KEYBOARD;
         devices[1].dwFlags = RIDEV_REMOVE;
         devices[1].hwndTarget = nullptr;
-        RegisterRawInputDevices(devices, std::size(devices), sizeof(devices[0]));
+        RegisterRawInputDevices(devices, std::size(devices), sizeof(*devices));
     }
 };
 
@@ -974,7 +977,7 @@ struct Console
     {
         do {
             INPUT_RECORD events[1024];
-            size_t count = in.consume_input_events(events, std::size(events));
+            auto count = in.consume_input_events(events, std::size(events));
             if (count == 0) {
                 break;
             }
@@ -1127,7 +1130,7 @@ private:
     void reset_title()
     {
         wchar_t buffer[128];
-        swprintf(buffer, std::size(buffer), L"%s%s", g_version_info.title, (!g_state.valid ? L" (error)" : (g_state.switches[*Switch::ENABLED] ? L"" : L" (disabled)")));
+        std::swprintf(buffer, std::size(buffer), L"%s%s", g_version_info.title, (!g_state.valid ? L" (error)" : (g_state.switches[*Switch::ENABLED] ? L"" : L" (disabled)")));
         SetConsoleTitleW(buffer);
     }
 
@@ -1174,7 +1177,7 @@ private:
 
         wchar_t buffer[count];
         in.read_text(buffer, count);
-        wcscpy(text, wcsstrip(buffer));
+        std::wcscpy(text, wcsstrip(buffer));
 
         out.set_cursor_info(prev_cursor_info);
         in.set_mode(prev_in_mode);
@@ -1188,8 +1191,8 @@ private:
         auto info = out.get_screen_buffer_info();
         auto initial_cursor = info.dwCursorPosition;
 
-        size_t buffer_size = info.dwSize.X + 1;
-        wchar_t buffer[buffer_size];
+        size_t count = info.dwSize.X + 1;
+        wchar_t buffer[count];
 
         {
             auto info = out.get_cursor_info();
@@ -1231,7 +1234,7 @@ private:
             if (!valid) {
                 out.set_text_attributes(FOREGROUND_INTENSITY | FOREGROUND_RED);
             }
-            swprintf(buffer, buffer_size, L"%-*s", INPUT_PADDING, CONSOLE_ITEM_NAMES[i]);
+            std::swprintf(buffer, count, L"%-*s", INPUT_PADDING, CONSOLE_ITEM_NAMES[i]);
             out.write_text_info(buffer, info);
             if (!valid) {
                 out.set_text_attributes(info.wAttributes);
@@ -1254,14 +1257,14 @@ private:
             out.set_text_attributes(FOREGROUND_RED | FOREGROUND_GREEN);
 
             wchar_t title[BUFFER_WIDTH + 1];
-            swprintf(title, BUFFER_WIDTH + 1, L"%s %s", g_version_info.title, g_version_info.version);
-            swprintf(buffer, buffer_size, L"%*s", info.dwSize.X - 2, title);
+            std::swprintf(title, std::size(title), L"%s %s", g_version_info.title, g_version_info.version);
+            std::swprintf(buffer, count, L"%*s", info.dwSize.X - 2, title);
 
             out.set_cursor_position(info.dwCursorPosition = {0, static_cast<SHORT>(info.dwCursorPosition.Y + 1)});
             out.write_text_info(buffer, info);
             out.fill(L' ', info.dwCursorPosition, info.dwSize.X - info.dwCursorPosition.X);
 
-            swprintf(buffer, buffer_size, L"%*s", info.dwSize.X - 2, g_version_info.copyright);
+            std::swprintf(buffer, count, L"%*s", info.dwSize.X - 2, g_version_info.copyright);
 
             out.set_cursor_position(info.dwCursorPosition = {0, static_cast<SHORT>(info.dwCursorPosition.Y + 1)});
             out.write_text_info(buffer, info);
@@ -1340,13 +1343,13 @@ private:
 
                 const wchar_t *start = g_state.cycle_vars_text[*cycle_var];
                 for (int i = 0; i < g_state.cycle_vars[*cycle_var].size(); ++i) {
-                    auto end = parse_double(start, g_state.cycle_vars[*cycle_var][i]);
+                    auto *end = parse_double(start, g_state.cycle_vars[*cycle_var][i]);
                     auto current_end = end;
-                    while (isspace(*(current_end - 1))) {
+                    while (std::isspace(*(current_end - 1))) {
                         --current_end;
                     }
 
-                    bool current = (g_state.cycle_vars[*cycle_var].size() != 1) && (i == g_state.current);
+                    auto current = (g_state.cycle_vars[*cycle_var].size() != 1) && (i == g_state.current);
 
                     if (current) {
                         out.set_text_attributes(BACKGROUND_RED | BACKGROUND_BLUE | FOREGROUND_INTENSITY | FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
@@ -1834,7 +1837,7 @@ void State::parse_cycle_vars()
                 break;
             }
 
-            if (!isspace(*(p - 1))) {
+            if (!std::isspace(*(p - 1))) {
                 g_state.count = 0;
                 return;
             }
