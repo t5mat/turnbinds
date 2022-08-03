@@ -2,6 +2,13 @@ cmake_minimum_required(VERSION 3.10)
 
 project(turnbinds CXX)
 
+set_property(
+    SOURCE
+        "${CMAKE_CURRENT_LIST_DIR}/turnbinds.rc"
+    APPEND PROPERTY OBJECT_DEPENDS
+        "${CMAKE_CURRENT_LIST_DIR}/turnbinds.ico"
+)
+
 add_executable(turnbinds
     "${CMAKE_CURRENT_LIST_DIR}/turnbinds.rc"
     "${CMAKE_CURRENT_LIST_DIR}/turnbinds.cpp"
