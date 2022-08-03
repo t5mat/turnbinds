@@ -68,6 +68,16 @@ Navigate down until selector is hidden and press **Return** to enter developer m
 - *rate* (default 1000) - maximum number of simulated mouse inputs per second, lower values decrease CPU usage in favor of turn smoothness
 - *sleep* (default 3500) - main loop sleep duration (measured in 100ns units, 3500 = 0.35ms), higher values decrease input polling rate and overall CPU usage
 
+## Anti-cheat software
+
+The program does not patch or inject anything into the game.
+
+Apart from simulating mouse input, it doesn't really do anything suspicious.
+
+It would be fair to say it's as bannable as an AutoHotKey script.
+
+Anti-cheat software can easily detect the simulation of mouse movement though, and either prevent it or prevent the program from running completely. This is expected, just don't actively try to use this program in unintended scenarios.
+
 ## Building
 
 Run `./build` on a Linux machine with Docker installed.
