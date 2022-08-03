@@ -801,15 +801,14 @@ private:
     }
 };
 
-struct BindHandler
+struct MouseMoveCalculator
 {
-    void reset()
+    long long update(bool reset, Input &input)
     {
-        last_down = {};
-    }
+        if (reset) {
+            last_down = {};
+        }
 
-    void run(Input &input)
-    {
         if (!last_down[*Bind::CYCLE] && input.down[g_state.binds[*Bind::CYCLE]]) {
             g_state.current = (g_state.current + 1) % g_state.count;
             g_state.on_current_changed();
@@ -826,28 +825,27 @@ struct BindHandler
             last_down[i] = input.down[g_state.binds[i]];
         }
 
-        if ((input.down[g_state.binds[*Bind::LEFT]] ^ input.down[g_state.binds[*Bind::RIGHT]]) && time - last_time >= win32::PERFORMANCE_COUNTER_FREQUENCY * (1.0 / *g_state.vars[*Var::RATE])) {
-            double cycle_vars[*CycleVar::COUNT];
-            for (int i = 0; i < std::size(cycle_vars); ++i) {
-                cycle_vars[i] = g_state.cycle_vars[i][g_state.current % g_state.cycle_vars[i].size()];
-            }
-
-            remaining +=
-                (
-                    (int(input.down[g_state.binds[*Bind::LEFT]]) * -1 + int(input.down[g_state.binds[*Bind::RIGHT]])) *
-                    (cycle_vars[*CycleVar::YAWSPEED] / (cycle_vars[*CycleVar::SENSITIVITY] * cycle_vars[*CycleVar::YAW])) *
-                    (input.down[g_state.binds[*Bind::SPEED]] ? cycle_vars[*CycleVar::ANGLESPEEDKEY] : 1.0) *
-                    (time - last_time)
-                ) / win32::PERFORMANCE_COUNTER_FREQUENCY;
-
-            auto amount = static_cast<long long>(remaining);
-            if (amount != 0) {
-                win32::move_mouse_by(amount, 0);
-                remaining -= amount;
-            }
-
-            last_time = time;
+        if (!(input.down[g_state.binds[*Bind::LEFT]] ^ input.down[g_state.binds[*Bind::RIGHT]]) || time - last_time < win32::PERFORMANCE_COUNTER_FREQUENCY * (1.0 / *g_state.vars[*Var::RATE])) {
+            return 0;
         }
+
+        double cycle_vars[*CycleVar::COUNT];
+        for (int i = 0; i < std::size(cycle_vars); ++i) {
+            cycle_vars[i] = g_state.cycle_vars[i][g_state.current % g_state.cycle_vars[i].size()];
+        }
+
+        remaining +=
+            (
+                (int(input.down[g_state.binds[*Bind::LEFT]]) * -1 + int(input.down[g_state.binds[*Bind::RIGHT]])) *
+                (cycle_vars[*CycleVar::YAWSPEED] / (cycle_vars[*CycleVar::SENSITIVITY] * cycle_vars[*CycleVar::YAW])) *
+                (input.down[g_state.binds[*Bind::SPEED]] ? cycle_vars[*CycleVar::ANGLESPEEDKEY] : 1.0) *
+                (time - last_time)
+            ) / win32::PERFORMANCE_COUNTER_FREQUENCY;
+
+        auto amount = static_cast<long long>(remaining);
+        remaining -= amount;
+        last_time = time;
+        return amount;
     }
 
 private:
@@ -863,18 +861,15 @@ enum class WindowCommand
     EXIT,
 };
 
-const struct VersionInfo
+struct VersionInfo
 {
     const wchar_t *name;
     const wchar_t *title;
     const wchar_t *version;
     const wchar_t *copyright;
 
-    VersionInfo()
+    VersionInfo(const wchar_t *path)
     {
-        wchar_t path[PATHCCH_MAX_CCH];
-        GetModuleFileNameW(nullptr, path, std::size(path));
-
         DWORD handle;
         auto size = GetFileVersionInfoSizeW(path, &handle);
 
@@ -890,7 +885,7 @@ const struct VersionInfo
 
 private:
     std::vector<char> data;
-} g_version_info;
+};
 
 struct Console
 {
@@ -899,10 +894,11 @@ struct Console
     win32::ConsoleInput in;
     bool editing = false;
 
-    Console() :
+    Console(const VersionInfo &version_info) :
         hwnd(GetConsoleWindow()),
         out(CreateConsoleScreenBuffer(GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE | FILE_SHARE_READ, nullptr, CONSOLE_TEXTMODE_BUFFER, nullptr)),
-        in(GetStdHandle(STD_INPUT_HANDLE))
+        in(GetStdHandle(STD_INPUT_HANDLE)),
+        version_info(version_info)
     {
         initial_in_mode = in.get_mode();
 
@@ -1122,6 +1118,8 @@ private:
     static constexpr SHORT BUFFER_HEIGHT[] = {17, 21};
     static constexpr auto INPUT_PADDING = 18;
 
+    const VersionInfo &version_info;
+
     DWORD initial_in_mode;
 
     COORD positions_selector[*ConsoleItem::COUNT];
@@ -1130,7 +1128,7 @@ private:
     void reset_title()
     {
         wchar_t buffer[128];
-        std::swprintf(buffer, std::size(buffer), L"%s%s", g_version_info.title, (!g_state.valid ? L" (error)" : (g_state.switches[*Switch::ENABLED] ? L"" : L" (disabled)")));
+        std::swprintf(buffer, std::size(buffer), L"%s%s", version_info.title, (!g_state.valid ? L" (error)" : (g_state.switches[*Switch::ENABLED] ? L"" : L" (disabled)")));
         SetConsoleTitleW(buffer);
     }
 
@@ -1257,14 +1255,14 @@ private:
             out.set_text_attributes(FOREGROUND_RED | FOREGROUND_GREEN);
 
             wchar_t title[BUFFER_WIDTH + 1];
-            std::swprintf(title, std::size(title), L"%s %s", g_version_info.title, g_version_info.version);
+            std::swprintf(title, std::size(title), L"%s %s", version_info.title, version_info.version);
             std::swprintf(buffer, count, L"%*s", info.dwSize.X - 2, title);
 
             out.set_cursor_position(info.dwCursorPosition = {0, static_cast<SHORT>(info.dwCursorPosition.Y + 1)});
             out.write_text_info(buffer, info);
             out.fill(L' ', info.dwCursorPosition, info.dwSize.X - info.dwCursorPosition.X);
 
-            std::swprintf(buffer, count, L"%*s", info.dwSize.X - 2, g_version_info.copyright);
+            std::swprintf(buffer, count, L"%*s", info.dwSize.X - 2, version_info.copyright);
 
             out.set_cursor_position(info.dwCursorPosition = {0, static_cast<SHORT>(info.dwCursorPosition.Y + 1)});
             out.write_text_info(buffer, info);
@@ -1479,64 +1477,85 @@ private:
     NOTIFYICONDATAW data;
 };
 
-struct Settings
+struct HideOnMinimize
 {
-    Settings()
+    HideOnMinimize(HWND hwnd)
     {
-        GetModuleFileNameW(nullptr, path, std::size(path));
-        PathCchRenameExtension(path, std::size(path), L"ini");
-    }
+        hwnd_ = hwnd;
 
-    void load()
-    {
-        g_state.developer = (GetPrivateProfileIntW(g_version_info.name, L"developer", 0, path) == 1);
-        g_state.binds[*Bind::LEFT] = GetPrivateProfileIntW(g_version_info.name, L"bind_left", VK_LBUTTON, path);
-        g_state.binds[*Bind::RIGHT] = GetPrivateProfileIntW(g_version_info.name, L"bind_right", VK_RBUTTON, path);
-        g_state.binds[*Bind::SPEED] = GetPrivateProfileIntW(g_version_info.name, L"bind_speed", VK_LSHIFT, path);
-        g_state.binds[*Bind::CYCLE] = GetPrivateProfileIntW(g_version_info.name, L"bind_cycle", VK_XBUTTON1, path);
-        GetPrivateProfileStringW(g_version_info.name, L"rate", L"1000", g_state.vars_text[*Var::RATE], std::size(g_state.vars_text[*Var::RATE]), path);
-        GetPrivateProfileStringW(g_version_info.name, L"sleep", L"3500", g_state.vars_text[*Var::SLEEP], std::size(g_state.vars_text[*Var::SLEEP]), path);
-        GetPrivateProfileStringW(g_version_info.name, L"cl_yawspeed", L"75 120 210", g_state.cycle_vars_text[*CycleVar::YAWSPEED], std::size(g_state.cycle_vars_text[*CycleVar::YAWSPEED]), path);
-        GetPrivateProfileStringW(g_version_info.name, L"sensitivity", L"1.0", g_state.cycle_vars_text[*CycleVar::SENSITIVITY], std::size(g_state.cycle_vars_text[*CycleVar::SENSITIVITY]), path);
-        GetPrivateProfileStringW(g_version_info.name, L"cl_anglespeedkey", L"0.67", g_state.cycle_vars_text[*CycleVar::ANGLESPEEDKEY], std::size(g_state.cycle_vars_text[*CycleVar::ANGLESPEEDKEY]), path);
-        GetPrivateProfileStringW(g_version_info.name, L"m_yaw", L"0.022", g_state.cycle_vars_text[*CycleVar::YAW], std::size(g_state.cycle_vars_text[*CycleVar::YAW]), path);
-        g_state.switches[*Switch::ENABLED] = (GetPrivateProfileIntW(g_version_info.name, L"enabled", 1, path) == 1);
-        g_state.switches[*Switch::RAW_INPUT] = (GetPrivateProfileIntW(g_version_info.name, L"raw_input", 0, path) == 1);
-        g_state.current = GetPrivateProfileIntW(g_version_info.name, L"current", 0, path);
-        g_state.selected = static_cast<ConsoleItem>(GetPrivateProfileIntW(g_version_info.name, L"selected", 0, path));
-
-        WINDOWPLACEMENT placement;
-        if (GetPrivateProfileStructW(g_version_info.name, L"placement", &placement, sizeof(placement), path)) {
-            g_state.placement = placement;
-        }
-
-        g_state.on_settings_loaded();
-    }
-
-    void save()
-    {
-        g_state.on_settings_save();
-
-        win32::WritePrivateProfileIntW(g_version_info.name, L"developer", g_state.developer, path);
-        win32::WritePrivateProfileIntW(g_version_info.name, L"bind_left", g_state.binds[*Bind::LEFT], path);
-        win32::WritePrivateProfileIntW(g_version_info.name, L"bind_right", g_state.binds[*Bind::RIGHT], path);
-        win32::WritePrivateProfileIntW(g_version_info.name, L"bind_speed", g_state.binds[*Bind::SPEED], path);
-        win32::WritePrivateProfileIntW(g_version_info.name, L"bind_cycle", g_state.binds[*Bind::CYCLE], path);
-        WritePrivateProfileStringW(g_version_info.name, L"rate", g_state.vars_text[*Var::RATE], path);
-        WritePrivateProfileStringW(g_version_info.name, L"sleep", g_state.vars_text[*Var::SLEEP], path);
-        WritePrivateProfileStringW(g_version_info.name, L"cl_yawspeed", g_state.cycle_vars_text[*CycleVar::YAWSPEED], path);
-        WritePrivateProfileStringW(g_version_info.name, L"sensitivity", g_state.cycle_vars_text[*CycleVar::SENSITIVITY], path);
-        WritePrivateProfileStringW(g_version_info.name, L"cl_anglespeedkey", g_state.cycle_vars_text[*CycleVar::ANGLESPEEDKEY], path);
-        WritePrivateProfileStringW(g_version_info.name, L"m_yaw", g_state.cycle_vars_text[*CycleVar::YAW], path);
-        win32::WritePrivateProfileIntW(g_version_info.name, L"enabled", g_state.switches[*Switch::ENABLED], path);
-        win32::WritePrivateProfileIntW(g_version_info.name, L"raw_input", g_state.switches[*Switch::RAW_INPUT], path);
-        win32::WritePrivateProfileIntW(g_version_info.name, L"current", g_state.current, path);
-        win32::WritePrivateProfileIntW(g_version_info.name, L"selected", *g_state.selected, path);
-        WritePrivateProfileStructW(g_version_info.name, L"placement", &(*g_state.placement), sizeof(*g_state.placement), path);
+        SetWinEventHook(EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZESTART, nullptr, proc, 0, 0, WINEVENT_OUTOFCONTEXT);
     }
 
 private:
-    wchar_t path[PATHCCH_MAX_CCH];
+    static void proc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD idEventThread, DWORD dwmsEventTime)
+    {
+        if (hwnd == hwnd_) {
+            ShowWindow(hwnd, SW_HIDE);
+        }
+    }
+
+    static inline HWND hwnd_;
+};
+
+struct CursorMonitor
+{
+    CursorMonitor()
+    {
+        SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_HIDE, nullptr, proc, 0, 0, WINEVENT_OUTOFCONTEXT);
+
+        CURSORINFO info = {};
+        info.cbSize = sizeof(info);
+        GetCursorInfo(&info);
+        cursor_ = info.flags & CURSOR_SHOWING;
+    }
+
+    auto cursor()
+    {
+        return cursor_;
+    }
+
+private:
+    static void proc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD idEventThread, DWORD dwmsEventTime)
+    {
+        if (idObject == OBJID_CURSOR) {
+            cursor_ = (event == EVENT_OBJECT_SHOW);
+        }
+    }
+
+    static inline bool cursor_;
+};
+
+struct CtrlSignalHandler
+{
+    CtrlSignalHandler(HWND hwnd_)
+    {
+        hwnd = hwnd_;
+        event = CreateEventW(nullptr, false, false, nullptr);
+
+        SetConsoleCtrlHandler(proc, true);
+    }
+
+    void done()
+    {
+        SetEvent(event);
+    }
+
+private:
+    static BOOL proc(DWORD dwCtrlType)
+    {
+        switch (dwCtrlType) {
+        case CTRL_C_EVENT:
+        case CTRL_BREAK_EVENT:
+        case CTRL_CLOSE_EVENT:
+            PostMessageW(hwnd, WM_QUIT, 0, 0);
+            WaitForSingleObject(event, INFINITE);
+            return true;
+        }
+        return false;
+    }
+
+    static inline HWND hwnd;
+    static inline HANDLE event;
 };
 
 struct App
@@ -1547,32 +1566,34 @@ struct App
 
     static void run()
     {
-        SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
-        win32::set_timer_resolution(1);
+        GetModuleFileNameW(nullptr, image_path, std::size(image_path));
 
-        hwnd = win32::create_window(g_version_info.name, g_version_info.name, window_proc);
+        version_info.emplace(image_path);
 
-        SetWinEventHook(EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZESTART, nullptr, event_proc_minimize, 0, 0, WINEVENT_OUTOFCONTEXT);
+        std::wcscpy(ini_path, image_path);
+        PathCchRenameExtension(ini_path, std::size(ini_path), L"ini");
+
+        auto hwnd = win32::create_window(version_info->name, version_info->name, window_proc);
 
         input.emplace(hwnd);
 
-        console.emplace();
+        console.emplace(*version_info);
 
         if (win32::get_console_process_count() == 1) {
             SetWindowLong(console->hwnd, GWL_STYLE, GetWindowLong(console->hwnd, GWL_STYLE) & ~WS_SIZEBOX & ~WS_MAXIMIZEBOX);
             tray_icon.emplace(hwnd);
         }
 
-        BindHandler bind_handler;
+        MouseMoveCalculator mouse_move_calculator;
+        CursorMonitor cursor_monitor;
+        HideOnMinimize hide_on_minimize(console->hwnd);
+        CtrlSignalHandler ctrl_signal_handler(hwnd);
 
-        event = CreateEventW(nullptr, false, false, nullptr);
-        SetConsoleCtrlHandler(ctrl_signal_handler, true);
+        ini_load_settings();
+        g_state.on_settings_loaded();
 
-        SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_HIDE, nullptr, event_proc_cursor, 0, 0, WINEVENT_OUTOFCONTEXT);
-        cursor_visible = (win32::get_mouse_cursor_info().flags & CURSOR_SHOWING);
-
-        Settings settings;
-        settings.load();
+        SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
+        win32::set_timer_resolution(1);
 
         bool active = false;
 
@@ -1592,7 +1613,7 @@ struct App
             console->run(hwnd, *input);
 
             auto last_active = active;
-            active = (!console->editing && g_state.switches[*Switch::ENABLED] && g_state.valid && !cursor_visible);
+            active = (!console->editing && g_state.switches[*Switch::ENABLED] && g_state.valid && !cursor_monitor.cursor());
 
             if (!active) {
                 if (last_active) {
@@ -1606,10 +1627,13 @@ struct App
 
             if (!last_active) {
                 input->enable_binds();
-                bind_handler.reset();
             }
 
-            bind_handler.run(*input);
+            auto amount = mouse_move_calculator.update(!last_active, *input);
+            if (amount != 0) {
+                win32::move_mouse_by(amount, 0);
+            }
+
             win32::delay_execution_by(*g_state.vars[*Var::SLEEP]);
         } while (true);
 
@@ -1619,9 +1643,10 @@ struct App
 
         console.reset();
 
-        settings.save();
+        g_state.on_settings_save();
+        ini_save_settings();
 
-        SetEvent(event);
+        ctrl_signal_handler.done();
     }
 
     static LRESULT CALLBACK window_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -1635,18 +1660,18 @@ struct App
             return 0;
         case WM_COMMAND:
             switch (static_cast<WindowCommand>(LOWORD(wParam))) {
-                case WindowCommand::RESTORE:
-                    ShowWindow(console->hwnd, SW_RESTORE);
-                    SetForegroundWindow(console->hwnd);
-                    g_state.on_restored();
-                    break;
-                case WindowCommand::ENABLED:
-                    g_state.switches[*Switch::ENABLED] = !g_state.switches[*Switch::ENABLED];
-                    g_state.on_switch_changed(Switch::ENABLED);
-                    break;
-                case WindowCommand::EXIT:
-                    PostMessageW(hwnd, WM_QUIT, 0, 0);
-                    break;
+            case WindowCommand::RESTORE:
+                ShowWindow(console->hwnd, SW_RESTORE);
+                SetForegroundWindow(console->hwnd);
+                g_state.on_restored();
+                break;
+            case WindowCommand::ENABLED:
+                g_state.switches[*Switch::ENABLED] = !g_state.switches[*Switch::ENABLED];
+                g_state.on_switch_changed(Switch::ENABLED);
+                break;
+            case WindowCommand::EXIT:
+                PostMessageW(hwnd, WM_QUIT, 0, 0);
+                break;
             }
             return 0;
         default:
@@ -1658,45 +1683,54 @@ struct App
         return 0;
     }
 
-    static void event_proc_minimize(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD idEventThread, DWORD dwmsEventTime)
+    static void ini_load_settings()
     {
-        switch (event) {
-        case EVENT_SYSTEM_MINIMIZESTART:
-            if (hwnd == console->hwnd) {
-                ShowWindow(hwnd, SW_HIDE);
-            }
-            break;
+        g_state.developer = (GetPrivateProfileIntW(version_info->name, L"developer", 0, ini_path) == 1);
+        g_state.binds[*Bind::LEFT] = GetPrivateProfileIntW(version_info->name, L"bind_left", VK_LBUTTON, ini_path);
+        g_state.binds[*Bind::RIGHT] = GetPrivateProfileIntW(version_info->name, L"bind_right", VK_RBUTTON, ini_path);
+        g_state.binds[*Bind::SPEED] = GetPrivateProfileIntW(version_info->name, L"bind_speed", VK_LSHIFT, ini_path);
+        g_state.binds[*Bind::CYCLE] = GetPrivateProfileIntW(version_info->name, L"bind_cycle", VK_XBUTTON1, ini_path);
+        GetPrivateProfileStringW(version_info->name, L"rate", L"1000", g_state.vars_text[*Var::RATE], std::size(g_state.vars_text[*Var::RATE]), ini_path);
+        GetPrivateProfileStringW(version_info->name, L"sleep", L"3500", g_state.vars_text[*Var::SLEEP], std::size(g_state.vars_text[*Var::SLEEP]), ini_path);
+        GetPrivateProfileStringW(version_info->name, L"cl_yawspeed", L"75 120 210", g_state.cycle_vars_text[*CycleVar::YAWSPEED], std::size(g_state.cycle_vars_text[*CycleVar::YAWSPEED]), ini_path);
+        GetPrivateProfileStringW(version_info->name, L"sensitivity", L"1.0", g_state.cycle_vars_text[*CycleVar::SENSITIVITY], std::size(g_state.cycle_vars_text[*CycleVar::SENSITIVITY]), ini_path);
+        GetPrivateProfileStringW(version_info->name, L"cl_anglespeedkey", L"0.67", g_state.cycle_vars_text[*CycleVar::ANGLESPEEDKEY], std::size(g_state.cycle_vars_text[*CycleVar::ANGLESPEEDKEY]), ini_path);
+        GetPrivateProfileStringW(version_info->name, L"m_yaw", L"0.022", g_state.cycle_vars_text[*CycleVar::YAW], std::size(g_state.cycle_vars_text[*CycleVar::YAW]), ini_path);
+        g_state.switches[*Switch::ENABLED] = (GetPrivateProfileIntW(version_info->name, L"enabled", 1, ini_path) == 1);
+        g_state.switches[*Switch::RAW_INPUT] = (GetPrivateProfileIntW(version_info->name, L"raw_input", 0, ini_path) == 1);
+        g_state.current = GetPrivateProfileIntW(version_info->name, L"current", 0, ini_path);
+        g_state.selected = static_cast<ConsoleItem>(GetPrivateProfileIntW(version_info->name, L"selected", 0, ini_path));
+
+        WINDOWPLACEMENT placement;
+        if (GetPrivateProfileStructW(version_info->name, L"placement", &placement, sizeof(placement), ini_path)) {
+            g_state.placement = placement;
         }
     }
 
-    static void event_proc_cursor(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD idEventThread, DWORD dwmsEventTime)
+    static void ini_save_settings()
     {
-        if (idObject == OBJID_CURSOR) {
-            if (event == EVENT_OBJECT_HIDE) {
-                cursor_visible = false;
-            } else if (event == EVENT_OBJECT_SHOW) {
-                cursor_visible = true;
-            }
-        }
-    }
-
-    static BOOL ctrl_signal_handler(DWORD dwCtrlType)
-    {
-        switch (dwCtrlType) {
-        case CTRL_C_EVENT:
-        case CTRL_BREAK_EVENT:
-        case CTRL_CLOSE_EVENT:
-            PostMessageW(hwnd, WM_QUIT, 0, 0);
-            WaitForSingleObject(event, INFINITE);
-            return true;
-        }
-        return false;
+        win32::WritePrivateProfileIntW(version_info->name, L"developer", g_state.developer, ini_path);
+        win32::WritePrivateProfileIntW(version_info->name, L"bind_left", g_state.binds[*Bind::LEFT], ini_path);
+        win32::WritePrivateProfileIntW(version_info->name, L"bind_right", g_state.binds[*Bind::RIGHT], ini_path);
+        win32::WritePrivateProfileIntW(version_info->name, L"bind_speed", g_state.binds[*Bind::SPEED], ini_path);
+        win32::WritePrivateProfileIntW(version_info->name, L"bind_cycle", g_state.binds[*Bind::CYCLE], ini_path);
+        WritePrivateProfileStringW(version_info->name, L"rate", g_state.vars_text[*Var::RATE], ini_path);
+        WritePrivateProfileStringW(version_info->name, L"sleep", g_state.vars_text[*Var::SLEEP], ini_path);
+        WritePrivateProfileStringW(version_info->name, L"cl_yawspeed", g_state.cycle_vars_text[*CycleVar::YAWSPEED], ini_path);
+        WritePrivateProfileStringW(version_info->name, L"sensitivity", g_state.cycle_vars_text[*CycleVar::SENSITIVITY], ini_path);
+        WritePrivateProfileStringW(version_info->name, L"cl_anglespeedkey", g_state.cycle_vars_text[*CycleVar::ANGLESPEEDKEY], ini_path);
+        WritePrivateProfileStringW(version_info->name, L"m_yaw", g_state.cycle_vars_text[*CycleVar::YAW], ini_path);
+        win32::WritePrivateProfileIntW(version_info->name, L"enabled", g_state.switches[*Switch::ENABLED], ini_path);
+        win32::WritePrivateProfileIntW(version_info->name, L"raw_input", g_state.switches[*Switch::RAW_INPUT], ini_path);
+        win32::WritePrivateProfileIntW(version_info->name, L"current", g_state.current, ini_path);
+        win32::WritePrivateProfileIntW(version_info->name, L"selected", *g_state.selected, ini_path);
+        WritePrivateProfileStructW(version_info->name, L"placement", &(*g_state.placement), sizeof(*g_state.placement), ini_path);
     }
 
 private:
-    inline static HWND hwnd;
-    inline static HANDLE event;
-    inline static bool cursor_visible;
+    inline static wchar_t image_path[PATHCCH_MAX_CCH];
+    inline static wchar_t ini_path[PATHCCH_MAX_CCH];
+    inline static std::optional<VersionInfo> version_info;
 };
 
 void State::on_settings_loaded()
