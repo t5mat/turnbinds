@@ -8,7 +8,7 @@ BEGIN
     BEGIN
         BLOCK "040904E4"
         BEGIN
-            VALUE "FileDescription", "Turnbinds (+left/+right)"
+            VALUE "FileDescription", "turnbinds for CS:GO"
             VALUE "FileVersion", "2.1.0"
             VALUE "InternalName", "turnbinds"
             VALUE "LegalCopyright", "https://github.com/t5mat/turnbinds"
