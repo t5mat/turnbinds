@@ -1,4 +1,4 @@
-<h1 align="center">turnbinds</h1>
+<h1 align="center"><img src="https://user-images.githubusercontent.com/16616463/182579363-4bce6231-b03d-40fb-859e-2b49b4929c15.png" width="24" height="23"> turnbinds</h1>
 
 <p align="center">
 <img src="https://user-images.githubusercontent.com/16616463/149217736-8c7a002e-1b9e-446a-9603-34a3ebe0e0f0.gif">
@@ -64,7 +64,7 @@ sensitivity 2.0
 
 Navigate down until selector is hidden and press **Return** to enter developer mode.
 
-- *raw input* (default off) - key detection method (should probably be kept off, see [issue #2](https://github.com/t5mat/turnbinds/issues/2))
+- *raw input* (default off) - key detection method **should probably be kept off, see [issue #2](https://github.com/t5mat/turnbinds/issues/2)**
 - *rate* (default 1000) - maximum number of simulated mouse inputs per second, lower values decrease CPU usage in favor of turn smoothness
 - *sleep* (default 3500) - main loop sleep duration (measured in 100ns units, 3500 = 0.35ms), higher values decrease input polling rate and overall CPU usage
 
