@@ -36,7 +36,7 @@ You can use this program in a number of different ways,
 - cycle both *cl_yawspeed* and *cl_anglespeedkey*
 
 <blockquote>
-    
+
 <p>Optionally, you'd might want to cycle between <i>sensitivity</i> values (increasing both <i>cl_yawspeed</i> and <i>sensitivity</i> for sharper turns).</p>
 <p>In this case, the program's <i>sensitivity</i> and the in-game <code>sensitivity</code> need to be kept in sync. This is because the program is external to the game and cannot control your in-game <code>sensitivity</code> - <i>sensitivity</i> values in the program are only used to calculate the correct turning speed.</p>
 <p>You'd want to bind your <i>cycle</i> key in-game to cycle between your <i>sensitivity</i> values, and make sure the in-game <code>sensitivity</code> and the program's current <i>sensitivity</i> value are the same.</p>
