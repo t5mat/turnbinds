@@ -8,6 +8,10 @@ Provides turnbinds (`+left/+right`) with customizable yawspeed for CS:GO surf.
 
 The convars `cl_yawspeed`, `cl_anglespeedkey`, which allow control of the turning speed in previous games in the series (1.6, Source), have been made inaccessible in CS:GO. This program aims to solve this by providing binds that turn your view angles by simulating mouse movement.
 
+- [Usage](#usage)
+- [Anti-cheat software](#anti-cheat-software)
+- [Building](#building)
+
 ## Usage
 
 [Download](https://github.com/t5mat/turnbinds/releases/latest/download/turnbinds.exe) and run `turnbinds.exe`.
