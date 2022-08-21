@@ -78,7 +78,7 @@ The program does not patch or inject anything into the game.
 
 Apart from simulating mouse input, it doesn't really do anything suspicious.
 
-It would be fair to say it's as bannable as an AutoHotKey script.
+It would be fair to say it's as bannable as an AutoHotkey script.
 
 Anti-cheat software can easily detect the simulation of mouse movement though, and either prevent it or prevent the program from running completely. This is expected, just don't actively try to use this program in unintended scenarios.
 
