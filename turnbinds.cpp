@@ -247,7 +247,7 @@ struct ConsoleBase
 {
     HANDLE handle;
 
-    explicit ConsoleBase(HANDLE handle) : handle(handle) {}
+    ConsoleBase(HANDLE handle) : handle(handle) {}
 
     DWORD get_mode()
     {
@@ -267,7 +267,7 @@ struct ConsoleBase
 struct ConsoleInput :
     ConsoleBase
 {
-    explicit ConsoleInput(HANDLE handle) : ConsoleBase(handle) {}
+    ConsoleInput(HANDLE handle) : ConsoleBase(handle) {}
 
     size_t consume_input_events(INPUT_RECORD *buffer, DWORD count)
     {
@@ -321,7 +321,7 @@ struct ConsoleInput :
 struct ConsoleOutput :
     ConsoleBase
 {
-    explicit ConsoleOutput(HANDLE handle) : ConsoleBase(handle) {}
+    ConsoleOutput(HANDLE handle) : ConsoleBase(handle) {}
 
     void set_as_active_screen_buffer()
     {
@@ -615,7 +615,7 @@ struct Input
     USHORT captured;
     bool binds = false;
 
-    explicit Input(HWND hwnd) : hwnd(hwnd) {}
+    Input(HWND hwnd) : hwnd(hwnd) {}
 
     void start_capturing()
     {
@@ -1391,7 +1391,7 @@ private:
 
 struct TrayIcon
 {
-    explicit TrayIcon(HWND hwnd)
+    TrayIcon(HWND hwnd)
     {
         data = {};
         data.uVersion = NOTIFYICON_VERSION_4;
