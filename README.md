@@ -14,7 +14,7 @@ The convars `cl_yawspeed`, `cl_anglespeedkey`, which control the turning speed f
 
 - [Usage](#usage)
 - [Anti-cheat software](#anti-cheat-software)
-- [Building](#building)
+- [Development](#development)
 
 ## Usage
 
@@ -86,6 +86,8 @@ It would be fair to say it's as VAC bannable as an AutoHotkey script.
 
 Anti-cheat software (FACEIT AC, ...) can easily detect the simulation of mouse movement though, and either prevent it or prevent the program from running completely. This is expected, just don't actively try to use this program in unintended scenarios.
 
-## Building
+## Development
 
-Run `./build` on a Linux machine with Docker installed.
+To build into `./build`:
+
+```docker build . -o ./build --progress=plain```
