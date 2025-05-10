@@ -1,12 +1,9 @@
 #include <cmath>
-#include <cwchar>
-#include <array>
 #include <optional>
 #include <vector>
 #include <utility>
 #include <pathcch.h>
 #include <windows.h>
-#include <shellapi.h>
 #include <windns.h>
 #include <hidusage.h>
 
@@ -74,18 +71,6 @@ constexpr auto VIRTUAL_KEYS = 256;
 const auto SHELL_TASKBAR_CREATED_MSG = RegisterWindowMessageW(L"TaskbarCreated");
 
 const auto PERFORMANCE_COUNTER_FREQUENCY = performance_counter_frequency();
-
-double GetPrivateProfileDoubleW(LPCWSTR lpAppName, LPCWSTR lpKeyName, double dblDefault, LPCWSTR lpFileName)
-{
-    wchar_t buffer[128];
-    GetPrivateProfileStringW(lpAppName, lpKeyName, L"", buffer, std::size(buffer), lpFileName);
-
-    double result;
-    if (buffer[0] == L'\0' || *parse_double(buffer, result) != L'\0' || std::isnan(result)) {
-        return dblDefault;
-    }
-    return result;
-}
 
 void WritePrivateProfileIntW(LPCWSTR lpAppName, LPCWSTR lpKeyName, int nInt, LPCWSTR lpFileName)
 {
@@ -212,14 +197,6 @@ size_t get_console_process_count()
 {
     DWORD list[1];
     return GetConsoleProcessList(list, std::size(list));
-}
-
-CURSORINFO get_mouse_cursor_info()
-{
-    CURSORINFO info = {};
-    info.cbSize = sizeof(info);
-    GetCursorInfo(&info);
-    return info;
 }
 
 HWND create_window(const wchar_t *class_name, const wchar_t *window_name, WNDPROC proc)
