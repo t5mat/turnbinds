@@ -68,8 +68,6 @@ long long performance_counter_frequency()
 
 constexpr auto VIRTUAL_KEYS = 256;
 
-const auto SHELL_TASKBAR_CREATED_MSG = RegisterWindowMessageW(L"TaskbarCreated");
-
 const auto PERFORMANCE_COUNTER_FREQUENCY = performance_counter_frequency();
 
 void WritePrivateProfileIntW(LPCWSTR lpAppName, LPCWSTR lpKeyName, int nInt, LPCWSTR lpFileName)
@@ -566,7 +564,6 @@ struct State
 
     void on_settings_loaded();
     void on_settings_save();
-    void on_restored();
     void on_developer_changed();
     void on_var_changed(Var var);
     void on_cycle_vars_changed();
@@ -826,13 +823,6 @@ private:
     std::array<bool, std::to_underlying(Bind::COUNT)> last_down;
 };
 
-enum class WindowCommand
-{
-    RESTORE,
-    ENABLED,
-    EXIT,
-};
-
 struct VersionInfo
 {
     const wchar_t *name;
@@ -900,11 +890,6 @@ struct Console
         GetWindowPlacement(hwnd, &(*g_state.placement));
     }
 
-    void on_restored()
-    {
-        resize();
-    }
-
     void on_developer_changed()
     {
         resize();
@@ -963,7 +948,7 @@ struct Console
                     switch (events[i].Event.KeyEvent.wVirtualKeyCode) {
                     case VK_ESCAPE:
                         if (events[i].Event.KeyEvent.bKeyDown) {
-                            PostMessageW(hwnd, WM_COMMAND, std::to_underlying(WindowCommand::EXIT), 0);
+                            PostMessageW(hwnd, WM_QUIT, 0, 0);
                         }
                         break;
                     case VK_UP:
@@ -1357,114 +1342,6 @@ private:
     }
 };
 
-struct TrayIcon
-{
-    TrayIcon(HWND hwnd)
-    {
-        data = {};
-        data.uVersion = NOTIFYICON_VERSION_4;
-        data.cbSize = sizeof(data);
-        data.hWnd = hwnd;
-        data.uID = 1;
-        data.uFlags = NIF_ICON | NIF_TIP | NIF_SHOWTIP | NIF_MESSAGE;
-        data.uCallbackMessage = WINDOW_MSG;
-        data.hIcon = static_cast<HICON>(::LoadImageW(GetModuleHandle(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
-    }
-
-    void show()
-    {
-        GetConsoleTitleW(data.szTip, std::size(data.szTip));
-        Shell_NotifyIconW(NIM_ADD, &data);
-        Shell_NotifyIconW(NIM_SETVERSION, &data);
-    }
-
-    void hide()
-    {
-        Shell_NotifyIconW(NIM_DELETE, &data);
-    }
-
-    void on_switch_changed(Switch switch_)
-    {
-        switch (switch_) {
-        case Switch::ENABLED:
-            refresh();
-            break;
-        }
-    }
-
-    void on_valid_updated()
-    {
-        refresh();
-    }
-
-    bool handle_msg(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
-    {
-        if (uMsg == win32::SHELL_TASKBAR_CREATED_MSG) {
-            show();
-            return true;
-        }
-
-        if (uMsg != WINDOW_MSG) {
-            return false;
-        }
-
-        switch (LOWORD(lParam)) {
-        case NIN_SELECT:
-            PostMessageW(hwnd, WM_COMMAND, std::to_underlying(WindowCommand::RESTORE), 0);
-            break;
-        case WM_CONTEXTMENU:
-            {
-                auto menu = CreatePopupMenu();
-                AppendMenuW(menu, (g_state.switches[std::to_underlying(Switch::ENABLED)] ? MF_CHECKED : MF_UNCHECKED), std::to_underlying(WindowCommand::ENABLED), L"Enabled");
-                AppendMenuW(menu, MF_STRING, std::to_underlying(WindowCommand::EXIT), L"Exit");
-
-                POINT point;
-                GetCursorPos(&point);
-
-                SetForegroundWindow(hwnd);
-                TrackPopupMenuEx(menu, TPM_LEFTBUTTON | TPM_LEFTALIGN | TPM_BOTTOMALIGN, point.x, point.y, hwnd, nullptr);
-                PostMessageW(hwnd, WM_NULL, 0, 0);
-
-                DestroyMenu(menu);
-            }
-            break;
-        }
-
-        return true;
-    }
-
-private:
-    static constexpr auto WINDOW_MSG = WM_USER + 0;
-
-    void refresh()
-    {
-        GetConsoleTitleW(data.szTip, std::size(data.szTip));
-        Shell_NotifyIconW(NIM_MODIFY, &data);
-    }
-
-    NOTIFYICONDATAW data;
-};
-
-struct HideOnMinimize
-{
-    HideOnMinimize(HWND hwnd)
-    {
-        hwnd_ = hwnd;
-
-        SetWinEventHook(EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZESTART, nullptr, proc, 0, 0, WINEVENT_OUTOFCONTEXT);
-    }
-
-private:
-    static void proc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD idEventThread, DWORD dwmsEventTime)
-    {
-        if (hwnd == hwnd_) {
-            ShowWindow(hwnd, SW_HIDE);
-        }
-    }
-
-    static inline HWND hwnd_;
-};
-
 struct CursorMonitor
 {
     CursorMonitor()
@@ -1544,7 +1421,6 @@ struct App
 {
     inline static std::optional<Input> input;
     inline static std::optional<Console> console;
-    inline static std::optional<TrayIcon> tray_icon;
 
     static void run()
     {
@@ -1563,12 +1439,10 @@ struct App
 
         if (win32::get_console_process_count() == 1) {
             SetWindowLong(console->hwnd, GWL_STYLE, GetWindowLong(console->hwnd, GWL_STYLE) & ~WS_SIZEBOX & ~WS_MAXIMIZEBOX);
-            tray_icon.emplace(hwnd);
         }
 
         MouseMoveCalculator mouse_move_calculator;
         CursorMonitor cursor_monitor;
-        HideOnMinimize hide_on_minimize(console->hwnd);
         CtrlSignalHandler ctrl_signal_handler(hwnd);
 
         ini_load_settings();
@@ -1619,10 +1493,6 @@ struct App
             win32::delay_execution_by(*g_state.vars[std::to_underlying(Var::SLEEP)]);
         } while (true);
 
-        if (tray_icon) {
-            tray_icon->hide();
-        }
-
         console.reset();
 
         g_state.on_settings_save();
@@ -1640,26 +1510,7 @@ struct App
         case WM_DESTROY:
             PostQuitMessage(0);
             return 0;
-        case WM_COMMAND:
-            switch (static_cast<WindowCommand>(LOWORD(wParam))) {
-            case WindowCommand::RESTORE:
-                ShowWindow(console->hwnd, SW_RESTORE);
-                SetForegroundWindow(console->hwnd);
-                g_state.on_restored();
-                break;
-            case WindowCommand::ENABLED:
-                g_state.switches[std::to_underlying(Switch::ENABLED)] = !g_state.switches[std::to_underlying(Switch::ENABLED)];
-                g_state.on_switch_changed(Switch::ENABLED);
-                break;
-            case WindowCommand::EXIT:
-                PostMessageW(hwnd, WM_QUIT, 0, 0);
-                break;
-            }
-            return 0;
         default:
-            if (tray_icon && tray_icon->handle_msg(hwnd, uMsg, wParam, lParam)) {
-                return 0;
-            }
             return DefWindowProc(hwnd, uMsg, wParam, lParam);
         }
         return 0;
@@ -1735,20 +1586,12 @@ void State::on_settings_loaded()
         g_state.selected = static_cast<ConsoleItem>((std::to_underlying(g_state.selected) + 1) % (std::to_underlying(ConsoleItem::COUNT) + 1));
     }
 
-    if (App::tray_icon) {
-        App::tray_icon->show();
-    }
     App::console->on_settings_loaded();
 }
 
 void State::on_settings_save()
 {
     App::console->on_settings_save();
-}
-
-void State::on_restored()
-{
-    App::console->on_restored();
 }
 
 void State::on_developer_changed()
@@ -1781,9 +1624,6 @@ void State::on_switch_changed(Switch switch_)
 {
     App::input->on_switch_changed(switch_);
     App::console->on_switch_changed(switch_);
-    if (App::tray_icon) {
-        App::tray_icon->on_switch_changed(switch_);
-    }
 }
 
 void State::on_current_changed()
@@ -1794,9 +1634,6 @@ void State::on_current_changed()
 void State::on_valid_updated()
 {
     App::console->on_valid_updated();
-    if (App::tray_icon) {
-        App::tray_icon->on_valid_updated();
-    }
 }
 
 void State::on_selected_changed(ConsoleItem prev)
