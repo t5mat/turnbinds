@@ -8,9 +8,11 @@
 <img src="https://user-images.githubusercontent.com/16616463/149217736-8c7a002e-1b9e-446a-9603-34a3ebe0e0f0.gif">
 </p>
 
-Provides turnbinds (`+left/+right`) with customizable yawspeed for CS:GO surf.
+Provides external turnbinds (`+left/+right`) with customizable yawspeed for movement game modes in Source games.
 
-The convars `cl_yawspeed`, `cl_anglespeedkey`, which control the turning speed for the `+left/+right` commands, exist in previous games in the series (1.6, CS:S), but are inaccessible in CS:GO, forcing useless unchangable defaults (`cl_yawspeed 210`, `cl_anglespeedkey 0.67`). This program aims to fill this gap, as these commands are essential for movement game modes like surf.
+This program aims to fill the gap created by Valve disabling access to the `cl_yawspeed`, `cl_anglespeedkey` convars in the most recent versions of Counter-Strike (CS:GO, CS2), forcing useless unchangable defaults.
+
+These convars, which control the turning speed for the `+left/+right` commands, are essential for movement game modes like surf.
 
 - [Usage](#usage)
 - [Anti-cheat software](#anti-cheat-software)
