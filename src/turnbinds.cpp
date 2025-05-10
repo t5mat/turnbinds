@@ -3,6 +3,7 @@
 #include <array>
 #include <optional>
 #include <vector>
+#include <utility>
 #include <pathcch.h>
 #include <windows.h>
 #include <shellapi.h>
@@ -10,12 +11,6 @@
 #include <hidusage.h>
 
 namespace common {
-
-template<typename T>
-constexpr std::enable_if_t<std::is_enum<T>::value, std::underlying_type_t<T>> operator*(T v)
-{
-    return std::underlying_type_t<T>(v);
-}
 
 wchar_t *wcsstrip(wchar_t *s)
 {
@@ -577,17 +572,17 @@ struct State
 {
     bool developer;
 
-    UINT binds[*Bind::COUNT];
-    std::optional<double> vars[*Var::COUNT];
-    std::vector<double> cycle_vars[*CycleVar::COUNT];
-    bool switches[*Switch::COUNT];
+    UINT binds[std::to_underlying(Bind::COUNT)];
+    std::optional<double> vars[std::to_underlying(Var::COUNT)];
+    std::vector<double> cycle_vars[std::to_underlying(CycleVar::COUNT)];
+    bool switches[std::to_underlying(Switch::COUNT)];
     int current;
 
     bool valid;
     int count;
 
-    wchar_t vars_text[*Var::COUNT][128];
-    wchar_t cycle_vars_text[*CycleVar::COUNT][128];
+    wchar_t vars_text[std::to_underlying(Var::COUNT)][128];
+    wchar_t cycle_vars_text[std::to_underlying(CycleVar::COUNT)][128];
     ConsoleItem selected;
 
     std::optional<WINDOWPLACEMENT> placement;
@@ -621,7 +616,7 @@ struct Input
     {
         capturing = true;
 
-        if (g_state.switches[*Switch::RAW_INPUT]) {
+        if (g_state.switches[std::to_underlying(Switch::RAW_INPUT)]) {
             if (++raw_input == 1) {
                 enable_raw_input();
             }
@@ -636,7 +631,7 @@ struct Input
     {
         binds = true;
 
-        if (g_state.switches[*Switch::RAW_INPUT]) {
+        if (g_state.switches[std::to_underlying(Switch::RAW_INPUT)]) {
             if (++raw_input == 1) {
                 enable_raw_input();
             }
@@ -651,7 +646,7 @@ struct Input
     {
         binds = false;
 
-        if (g_state.switches[*Switch::RAW_INPUT]) {
+        if (g_state.switches[std::to_underlying(Switch::RAW_INPUT)]) {
             if (--raw_input == 0) {
                 disable_raw_input();
             }
@@ -662,7 +657,7 @@ struct Input
     {
         switch (switch_) {
         case Switch::RAW_INPUT:
-            if (!g_state.switches[*switch_] && raw_input > 0) {
+            if (!g_state.switches[std::to_underlying(switch_)] && raw_input > 0) {
                 raw_input = 0;
                 disable_raw_input();
             }
@@ -678,7 +673,7 @@ struct Input
 
     void run()
     {
-        if (!g_state.switches[*Switch::RAW_INPUT]) {
+        if (!g_state.switches[std::to_underlying(Switch::RAW_INPUT)]) {
             if (capturing) {
                 for (int i = 0; i < std::size(down); ++i) {
                     auto last = down[i];
@@ -720,7 +715,7 @@ struct Input
                 break;
             }
 
-            if (!g_state.switches[*Switch::RAW_INPUT]) {
+            if (!g_state.switches[std::to_underlying(Switch::RAW_INPUT)]) {
                 continue;
             }
 
@@ -809,14 +804,14 @@ struct MouseMoveCalculator
             last_down = {};
         }
 
-        if (!last_down[*Bind::CYCLE] && input.down[g_state.binds[*Bind::CYCLE]]) {
+        if (!last_down[std::to_underlying(Bind::CYCLE)] && input.down[g_state.binds[std::to_underlying(Bind::CYCLE)]]) {
             g_state.current = (g_state.current + 1) % g_state.count;
             g_state.on_current_changed();
         }
 
         auto time = win32::performance_counter();
 
-        if ((last_down[*Bind::LEFT] ^ input.down[g_state.binds[*Bind::LEFT]]) || (last_down[*Bind::RIGHT] ^ input.down[g_state.binds[*Bind::RIGHT]])) {
+        if ((last_down[std::to_underlying(Bind::LEFT)] ^ input.down[g_state.binds[std::to_underlying(Bind::LEFT)]]) || (last_down[std::to_underlying(Bind::RIGHT)] ^ input.down[g_state.binds[std::to_underlying(Bind::RIGHT)]])) {
             last_time = time;
             remaining = 0.0;
         }
@@ -825,20 +820,20 @@ struct MouseMoveCalculator
             last_down[i] = input.down[g_state.binds[i]];
         }
 
-        if (!(input.down[g_state.binds[*Bind::LEFT]] ^ input.down[g_state.binds[*Bind::RIGHT]]) || time - last_time < win32::PERFORMANCE_COUNTER_FREQUENCY * (1.0 / *g_state.vars[*Var::RATE])) {
+        if (!(input.down[g_state.binds[std::to_underlying(Bind::LEFT)]] ^ input.down[g_state.binds[std::to_underlying(Bind::RIGHT)]]) || time - last_time < win32::PERFORMANCE_COUNTER_FREQUENCY * (1.0 / *g_state.vars[std::to_underlying(Var::RATE)])) {
             return 0;
         }
 
-        double cycle_vars[*CycleVar::COUNT];
+        double cycle_vars[std::to_underlying(CycleVar::COUNT)];
         for (int i = 0; i < std::size(cycle_vars); ++i) {
             cycle_vars[i] = g_state.cycle_vars[i][g_state.current % g_state.cycle_vars[i].size()];
         }
 
         remaining +=
             (
-                (int(input.down[g_state.binds[*Bind::LEFT]]) * -1 + int(input.down[g_state.binds[*Bind::RIGHT]])) *
-                (cycle_vars[*CycleVar::YAWSPEED] / (cycle_vars[*CycleVar::SENSITIVITY] * cycle_vars[*CycleVar::YAW])) *
-                (input.down[g_state.binds[*Bind::SPEED]] ? cycle_vars[*CycleVar::ANGLESPEEDKEY] : 1.0) *
+                (int(input.down[g_state.binds[std::to_underlying(Bind::LEFT)]]) * -1 + int(input.down[g_state.binds[std::to_underlying(Bind::RIGHT)]])) *
+                (cycle_vars[std::to_underlying(CycleVar::YAWSPEED)] / (cycle_vars[std::to_underlying(CycleVar::SENSITIVITY)] * cycle_vars[std::to_underlying(CycleVar::YAW)])) *
+                (input.down[g_state.binds[std::to_underlying(Bind::SPEED)]] ? cycle_vars[std::to_underlying(CycleVar::ANGLESPEEDKEY)] : 1.0) *
                 (time - last_time)
             ) / win32::PERFORMANCE_COUNTER_FREQUENCY;
 
@@ -851,7 +846,7 @@ struct MouseMoveCalculator
 private:
     long long last_time;
     double remaining;
-    std::array<bool, *Bind::COUNT> last_down;
+    std::array<bool, std::to_underlying(Bind::COUNT)> last_down;
 };
 
 enum class WindowCommand
@@ -991,7 +986,7 @@ struct Console
                     switch (events[i].Event.KeyEvent.wVirtualKeyCode) {
                     case VK_ESCAPE:
                         if (events[i].Event.KeyEvent.bKeyDown) {
-                            PostMessageW(hwnd, WM_COMMAND, *WindowCommand::EXIT, 0);
+                            PostMessageW(hwnd, WM_COMMAND, std::to_underlying(WindowCommand::EXIT), 0);
                         }
                         break;
                     case VK_UP:
@@ -1002,8 +997,8 @@ struct Console
                                 auto prev = g_state.selected;
 
                                 do {
-                                    g_state.selected = static_cast<ConsoleItem>((down ? (*g_state.selected + 1) : (*g_state.selected - 1 + *ConsoleItem::COUNT + 1)) % (*ConsoleItem::COUNT + 1));
-                                } while (!g_state.developer && is_developer_console_item(static_cast<ConsoleItem>(*g_state.selected)));
+                                    g_state.selected = static_cast<ConsoleItem>((down ? (std::to_underlying(g_state.selected) + 1) : (std::to_underlying(g_state.selected) - 1 + std::to_underlying(ConsoleItem::COUNT) + 1)) % (std::to_underlying(ConsoleItem::COUNT) + 1));
+                                } while (!g_state.developer && is_developer_console_item(g_state.selected));
 
                                 g_state.on_selected_changed(prev);
                             }
@@ -1024,7 +1019,7 @@ struct Console
                             case ConsoleItemType::SWITCH:
                                 {
                                     auto switch_ = to_switch(g_state.selected);
-                                    g_state.switches[*switch_] = right;
+                                    g_state.switches[std::to_underlying(switch_)] = right;
                                     g_state.on_switch_changed(switch_);
                                 }
                                 break;
@@ -1054,7 +1049,7 @@ struct Console
                             case ConsoleItemType::CYCLE_VAR:
                                 editing = true;
 
-                                for (int i = 0; i < *ConsoleItem::COUNT; ++i) {
+                                for (int i = 0; i < std::to_underlying(ConsoleItem::COUNT); ++i) {
                                     switch (console_item_type(static_cast<ConsoleItem>(i))) {
                                     case ConsoleItemType::CYCLE_VAR:
                                         redraw_item_value(static_cast<ConsoleItem>(i));
@@ -1089,7 +1084,7 @@ struct Console
                     break;
                 }
 
-                g_state.binds[*to_bind(g_state.selected)] = input.captured;
+                g_state.binds[std::to_underlying(to_bind(g_state.selected))] = input.captured;
                 editing = false;
 
                 redraw_item_value(g_state.selected);
@@ -1122,13 +1117,13 @@ private:
 
     DWORD initial_in_mode;
 
-    COORD positions_selector[*ConsoleItem::COUNT];
-    COORD positions_value[*ConsoleItem::COUNT];
+    COORD positions_selector[std::to_underlying(ConsoleItem::COUNT)];
+    COORD positions_value[std::to_underlying(ConsoleItem::COUNT)];
 
     void reset_title()
     {
         wchar_t buffer[128];
-        std::swprintf(buffer, std::size(buffer), L"%s%s", version_info.title, (!g_state.valid ? L" (error)" : (g_state.switches[*Switch::ENABLED] ? L"" : L" (disabled)")));
+        std::swprintf(buffer, std::size(buffer), L"%s%s", version_info.title, (!g_state.valid ? L" (error)" : (g_state.switches[std::to_underlying(Switch::ENABLED)] ? L"" : L" (disabled)")));
         SetConsoleTitleW(buffer);
     }
 
@@ -1156,17 +1151,17 @@ private:
             out.set_cursor_info(info);
         }
 
-        out.set_cursor_position(positions_value[*item]);
+        out.set_cursor_position(positions_value[std::to_underlying(item)]);
 
         wchar_t *text;
         size_t count;
         switch (console_item_type(item)) {
         case ConsoleItemType::VAR:
-            text = g_state.vars_text[*to_var(item)];
+            text = g_state.vars_text[std::to_underlying(to_var(item))];
             count = std::size(g_state.vars_text[0]);
             break;
         case ConsoleItemType::CYCLE_VAR:
-            text = g_state.cycle_vars_text[*to_cycle_var(item)];
+            text = g_state.cycle_vars_text[std::to_underlying(to_cycle_var(item))];
             count = std::size(g_state.cycle_vars_text[0]);
             break;
         }
@@ -1181,7 +1176,7 @@ private:
         in.set_mode(prev_in_mode);
         out.set_mode(prev_out_mode);
 
-        out.set_cursor_position(positions_value[*item]);
+        out.set_cursor_position(positions_value[std::to_underlying(item)]);
     }
 
     void redraw_full()
@@ -1203,7 +1198,7 @@ private:
         out.set_cursor_position(info.dwCursorPosition = {0, 0});
         out.fill(L' ', info.dwCursorPosition, info.dwSize.X - info.dwCursorPosition.X);
 
-        for (int i = 0; i < *ConsoleItem::COUNT; ++i) {
+        for (int i = 0; i < std::to_underlying(ConsoleItem::COUNT); ++i) {
             if (!g_state.developer && is_developer_console_item(static_cast<ConsoleItem>(i))) {
                 continue;
             }
@@ -1223,7 +1218,7 @@ private:
             bool valid = true;
             switch (type) {
             case ConsoleItemType::VAR:
-                valid = (g_state.vars[*to_var(static_cast<ConsoleItem>(i))] != std::nullopt);
+                valid = (g_state.vars[std::to_underlying(to_var(static_cast<ConsoleItem>(i)))] != std::nullopt);
                 break;
             case ConsoleItemType::CYCLE_VAR:
                 valid = (g_state.count > 0);
@@ -1277,7 +1272,7 @@ private:
 
     void redraw_item_value(ConsoleItem item)
     {
-        out.set_cursor_position(positions_value[*item]);
+        out.set_cursor_position(positions_value[std::to_underlying(item)]);
         auto info = out.get_screen_buffer_info();
         draw_item_value(item, info);
         out.fill(L' ', info.dwCursorPosition, info.dwSize.X - info.dwCursorPosition.X);
@@ -1286,12 +1281,12 @@ private:
     void redraw_selector(ConsoleItem prev)
     {
         if (prev != ConsoleItem::COUNT) {
-            out.set_cursor_position(positions_selector[*prev]);
+            out.set_cursor_position(positions_selector[std::to_underlying(prev)]);
             out.write_text(SELECTOR[false]);
         }
 
         if (g_state.selected != ConsoleItem::COUNT) {
-            out.set_cursor_position(positions_selector[*g_state.selected]);
+            out.set_cursor_position(positions_selector[std::to_underlying(g_state.selected)]);
             out.write_text(SELECTOR[true]);
         }
     }
@@ -1309,7 +1304,7 @@ private:
                 auto bind = to_bind(item);
 
                 wchar_t buffer[BUFFER_WIDTH + 1];
-                if (!win32::get_vk_string(g_state.binds[*bind], buffer, std::size(buffer))) {
+                if (!win32::get_vk_string(g_state.binds[std::to_underlying(bind)], buffer, std::size(buffer))) {
                     buffer[0] = L'\0';
                 }
 
@@ -1323,7 +1318,7 @@ private:
                 }
 
                 auto var = to_var(item);
-                out.write_text_info(g_state.vars_text[*var], info);
+                out.write_text_info(g_state.vars_text[std::to_underlying(var)], info);
             }
             break;
         case ConsoleItemType::CYCLE_VAR:
@@ -1335,19 +1330,19 @@ private:
                 auto cycle_var = to_cycle_var(item);
 
                 if (editing || g_state.count == 0) {
-                    out.write_text_info(g_state.cycle_vars_text[*cycle_var], info);
+                    out.write_text_info(g_state.cycle_vars_text[std::to_underlying(cycle_var)], info);
                     break;
                 }
 
-                const wchar_t *start = g_state.cycle_vars_text[*cycle_var];
-                for (int i = 0; i < g_state.cycle_vars[*cycle_var].size(); ++i) {
-                    auto *end = parse_double(start, g_state.cycle_vars[*cycle_var][i]);
+                const wchar_t *start = g_state.cycle_vars_text[std::to_underlying(cycle_var)];
+                for (int i = 0; i < g_state.cycle_vars[std::to_underlying(cycle_var)].size(); ++i) {
+                    auto *end = parse_double(start, g_state.cycle_vars[std::to_underlying(cycle_var)][i]);
                     auto current_end = end;
                     while (std::isspace(*(current_end - 1))) {
                         --current_end;
                     }
 
-                    auto current = (g_state.cycle_vars[*cycle_var].size() != 1) && (i == g_state.current);
+                    auto current = (g_state.cycle_vars[std::to_underlying(cycle_var)].size() != 1) && (i == g_state.current);
 
                     if (current) {
                         out.set_text_attributes(BACKGROUND_RED | BACKGROUND_BLUE | FOREGROUND_INTENSITY | FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
@@ -1366,21 +1361,21 @@ private:
             {
                 auto switch_ = to_switch(item);
 
-                if (!g_state.switches[*switch_]) {
+                if (!g_state.switches[std::to_underlying(switch_)]) {
                     out.set_text_attributes(BACKGROUND_RED | BACKGROUND_BLUE | FOREGROUND_INTENSITY | FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
                 }
                 out.write_text_info(L"off", info);
-                if (!g_state.switches[*switch_]) {
+                if (!g_state.switches[std::to_underlying(switch_)]) {
                     out.set_text_attributes(info.wAttributes);
                 }
 
                 out.write_text_info(L" ", info);
 
-                if (g_state.switches[*switch_]) {
+                if (g_state.switches[std::to_underlying(switch_)]) {
                     out.set_text_attributes(BACKGROUND_RED | BACKGROUND_BLUE | FOREGROUND_INTENSITY | FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
                 }
                 out.write_text_info(L"on", info);
-                if (g_state.switches[*switch_]) {
+                if (g_state.switches[std::to_underlying(switch_)]) {
                     out.set_text_attributes(info.wAttributes);
                 }
             }
@@ -1442,13 +1437,13 @@ struct TrayIcon
 
         switch (LOWORD(lParam)) {
         case NIN_SELECT:
-            PostMessageW(hwnd, WM_COMMAND, *WindowCommand::RESTORE, 0);
+            PostMessageW(hwnd, WM_COMMAND, std::to_underlying(WindowCommand::RESTORE), 0);
             break;
         case WM_CONTEXTMENU:
             {
                 auto menu = CreatePopupMenu();
-                AppendMenuW(menu, (g_state.switches[*Switch::ENABLED] ? MF_CHECKED : MF_UNCHECKED), *WindowCommand::ENABLED, L"Enabled");
-                AppendMenuW(menu, MF_STRING, *WindowCommand::EXIT, L"Exit");
+                AppendMenuW(menu, (g_state.switches[std::to_underlying(Switch::ENABLED)] ? MF_CHECKED : MF_UNCHECKED), std::to_underlying(WindowCommand::ENABLED), L"Enabled");
+                AppendMenuW(menu, MF_STRING, std::to_underlying(WindowCommand::EXIT), L"Exit");
 
                 POINT point;
                 GetCursorPos(&point);
@@ -1613,7 +1608,7 @@ struct App
             console->run(hwnd, *input);
 
             auto last_active = active;
-            active = (!console->editing && g_state.switches[*Switch::ENABLED] && g_state.valid && !cursor_monitor.cursor());
+            active = (!console->editing && g_state.switches[std::to_underlying(Switch::ENABLED)] && g_state.valid && !cursor_monitor.cursor());
 
             if (!active) {
                 if (last_active) {
@@ -1634,7 +1629,7 @@ struct App
                 win32::move_mouse_by(amount, 0);
             }
 
-            win32::delay_execution_by(*g_state.vars[*Var::SLEEP]);
+            win32::delay_execution_by(*g_state.vars[std::to_underlying(Var::SLEEP)]);
         } while (true);
 
         if (tray_icon) {
@@ -1666,7 +1661,7 @@ struct App
                 g_state.on_restored();
                 break;
             case WindowCommand::ENABLED:
-                g_state.switches[*Switch::ENABLED] = !g_state.switches[*Switch::ENABLED];
+                g_state.switches[std::to_underlying(Switch::ENABLED)] = !g_state.switches[std::to_underlying(Switch::ENABLED)];
                 g_state.on_switch_changed(Switch::ENABLED);
                 break;
             case WindowCommand::EXIT:
@@ -1686,18 +1681,18 @@ struct App
     static void ini_load_settings()
     {
         g_state.developer = (GetPrivateProfileIntW(version_info->name, L"developer", 0, ini_path) == 1);
-        g_state.binds[*Bind::LEFT] = GetPrivateProfileIntW(version_info->name, L"bind_left", VK_LBUTTON, ini_path);
-        g_state.binds[*Bind::RIGHT] = GetPrivateProfileIntW(version_info->name, L"bind_right", VK_RBUTTON, ini_path);
-        g_state.binds[*Bind::SPEED] = GetPrivateProfileIntW(version_info->name, L"bind_speed", VK_LSHIFT, ini_path);
-        g_state.binds[*Bind::CYCLE] = GetPrivateProfileIntW(version_info->name, L"bind_cycle", VK_XBUTTON1, ini_path);
-        GetPrivateProfileStringW(version_info->name, L"rate", L"1000", g_state.vars_text[*Var::RATE], std::size(g_state.vars_text[*Var::RATE]), ini_path);
-        GetPrivateProfileStringW(version_info->name, L"sleep", L"3500", g_state.vars_text[*Var::SLEEP], std::size(g_state.vars_text[*Var::SLEEP]), ini_path);
-        GetPrivateProfileStringW(version_info->name, L"cl_yawspeed", L"75 120 210", g_state.cycle_vars_text[*CycleVar::YAWSPEED], std::size(g_state.cycle_vars_text[*CycleVar::YAWSPEED]), ini_path);
-        GetPrivateProfileStringW(version_info->name, L"sensitivity", L"1.0", g_state.cycle_vars_text[*CycleVar::SENSITIVITY], std::size(g_state.cycle_vars_text[*CycleVar::SENSITIVITY]), ini_path);
-        GetPrivateProfileStringW(version_info->name, L"cl_anglespeedkey", L"0.67", g_state.cycle_vars_text[*CycleVar::ANGLESPEEDKEY], std::size(g_state.cycle_vars_text[*CycleVar::ANGLESPEEDKEY]), ini_path);
-        GetPrivateProfileStringW(version_info->name, L"m_yaw", L"0.022", g_state.cycle_vars_text[*CycleVar::YAW], std::size(g_state.cycle_vars_text[*CycleVar::YAW]), ini_path);
-        g_state.switches[*Switch::ENABLED] = (GetPrivateProfileIntW(version_info->name, L"enabled", 1, ini_path) == 1);
-        g_state.switches[*Switch::RAW_INPUT] = (GetPrivateProfileIntW(version_info->name, L"raw_input", 0, ini_path) == 1);
+        g_state.binds[std::to_underlying(Bind::LEFT)] = GetPrivateProfileIntW(version_info->name, L"bind_left", VK_LBUTTON, ini_path);
+        g_state.binds[std::to_underlying(Bind::RIGHT)] = GetPrivateProfileIntW(version_info->name, L"bind_right", VK_RBUTTON, ini_path);
+        g_state.binds[std::to_underlying(Bind::SPEED)] = GetPrivateProfileIntW(version_info->name, L"bind_speed", VK_LSHIFT, ini_path);
+        g_state.binds[std::to_underlying(Bind::CYCLE)] = GetPrivateProfileIntW(version_info->name, L"bind_cycle", VK_XBUTTON1, ini_path);
+        GetPrivateProfileStringW(version_info->name, L"rate", L"1000", g_state.vars_text[std::to_underlying(Var::RATE)], std::size(g_state.vars_text[std::to_underlying(Var::RATE)]), ini_path);
+        GetPrivateProfileStringW(version_info->name, L"sleep", L"3500", g_state.vars_text[std::to_underlying(Var::SLEEP)], std::size(g_state.vars_text[std::to_underlying(Var::SLEEP)]), ini_path);
+        GetPrivateProfileStringW(version_info->name, L"cl_yawspeed", L"75 120 210", g_state.cycle_vars_text[std::to_underlying(CycleVar::YAWSPEED)], std::size(g_state.cycle_vars_text[std::to_underlying(CycleVar::YAWSPEED)]), ini_path);
+        GetPrivateProfileStringW(version_info->name, L"sensitivity", L"1.0", g_state.cycle_vars_text[std::to_underlying(CycleVar::SENSITIVITY)], std::size(g_state.cycle_vars_text[std::to_underlying(CycleVar::SENSITIVITY)]), ini_path);
+        GetPrivateProfileStringW(version_info->name, L"cl_anglespeedkey", L"0.67", g_state.cycle_vars_text[std::to_underlying(CycleVar::ANGLESPEEDKEY)], std::size(g_state.cycle_vars_text[std::to_underlying(CycleVar::ANGLESPEEDKEY)]), ini_path);
+        GetPrivateProfileStringW(version_info->name, L"m_yaw", L"0.022", g_state.cycle_vars_text[std::to_underlying(CycleVar::YAW)], std::size(g_state.cycle_vars_text[std::to_underlying(CycleVar::YAW)]), ini_path);
+        g_state.switches[std::to_underlying(Switch::ENABLED)] = (GetPrivateProfileIntW(version_info->name, L"enabled", 1, ini_path) == 1);
+        g_state.switches[std::to_underlying(Switch::RAW_INPUT)] = (GetPrivateProfileIntW(version_info->name, L"raw_input", 0, ini_path) == 1);
         g_state.current = GetPrivateProfileIntW(version_info->name, L"current", 0, ini_path);
         g_state.selected = static_cast<ConsoleItem>(GetPrivateProfileIntW(version_info->name, L"selected", 0, ini_path));
 
@@ -1710,20 +1705,20 @@ struct App
     static void ini_save_settings()
     {
         win32::WritePrivateProfileIntW(version_info->name, L"developer", g_state.developer, ini_path);
-        win32::WritePrivateProfileIntW(version_info->name, L"bind_left", g_state.binds[*Bind::LEFT], ini_path);
-        win32::WritePrivateProfileIntW(version_info->name, L"bind_right", g_state.binds[*Bind::RIGHT], ini_path);
-        win32::WritePrivateProfileIntW(version_info->name, L"bind_speed", g_state.binds[*Bind::SPEED], ini_path);
-        win32::WritePrivateProfileIntW(version_info->name, L"bind_cycle", g_state.binds[*Bind::CYCLE], ini_path);
-        WritePrivateProfileStringW(version_info->name, L"rate", g_state.vars_text[*Var::RATE], ini_path);
-        WritePrivateProfileStringW(version_info->name, L"sleep", g_state.vars_text[*Var::SLEEP], ini_path);
-        WritePrivateProfileStringW(version_info->name, L"cl_yawspeed", g_state.cycle_vars_text[*CycleVar::YAWSPEED], ini_path);
-        WritePrivateProfileStringW(version_info->name, L"sensitivity", g_state.cycle_vars_text[*CycleVar::SENSITIVITY], ini_path);
-        WritePrivateProfileStringW(version_info->name, L"cl_anglespeedkey", g_state.cycle_vars_text[*CycleVar::ANGLESPEEDKEY], ini_path);
-        WritePrivateProfileStringW(version_info->name, L"m_yaw", g_state.cycle_vars_text[*CycleVar::YAW], ini_path);
-        win32::WritePrivateProfileIntW(version_info->name, L"enabled", g_state.switches[*Switch::ENABLED], ini_path);
-        win32::WritePrivateProfileIntW(version_info->name, L"raw_input", g_state.switches[*Switch::RAW_INPUT], ini_path);
+        win32::WritePrivateProfileIntW(version_info->name, L"bind_left", g_state.binds[std::to_underlying(Bind::LEFT)], ini_path);
+        win32::WritePrivateProfileIntW(version_info->name, L"bind_right", g_state.binds[std::to_underlying(Bind::RIGHT)], ini_path);
+        win32::WritePrivateProfileIntW(version_info->name, L"bind_speed", g_state.binds[std::to_underlying(Bind::SPEED)], ini_path);
+        win32::WritePrivateProfileIntW(version_info->name, L"bind_cycle", g_state.binds[std::to_underlying(Bind::CYCLE)], ini_path);
+        WritePrivateProfileStringW(version_info->name, L"rate", g_state.vars_text[std::to_underlying(Var::RATE)], ini_path);
+        WritePrivateProfileStringW(version_info->name, L"sleep", g_state.vars_text[std::to_underlying(Var::SLEEP)], ini_path);
+        WritePrivateProfileStringW(version_info->name, L"cl_yawspeed", g_state.cycle_vars_text[std::to_underlying(CycleVar::YAWSPEED)], ini_path);
+        WritePrivateProfileStringW(version_info->name, L"sensitivity", g_state.cycle_vars_text[std::to_underlying(CycleVar::SENSITIVITY)], ini_path);
+        WritePrivateProfileStringW(version_info->name, L"cl_anglespeedkey", g_state.cycle_vars_text[std::to_underlying(CycleVar::ANGLESPEEDKEY)], ini_path);
+        WritePrivateProfileStringW(version_info->name, L"m_yaw", g_state.cycle_vars_text[std::to_underlying(CycleVar::YAW)], ini_path);
+        win32::WritePrivateProfileIntW(version_info->name, L"enabled", g_state.switches[std::to_underlying(Switch::ENABLED)], ini_path);
+        win32::WritePrivateProfileIntW(version_info->name, L"raw_input", g_state.switches[std::to_underlying(Switch::RAW_INPUT)], ini_path);
         win32::WritePrivateProfileIntW(version_info->name, L"current", g_state.current, ini_path);
-        win32::WritePrivateProfileIntW(version_info->name, L"selected", *g_state.selected, ini_path);
+        win32::WritePrivateProfileIntW(version_info->name, L"selected", std::to_underlying(g_state.selected), ini_path);
         WritePrivateProfileStructW(version_info->name, L"placement", &(*g_state.placement), sizeof(*g_state.placement), ini_path);
     }
 
@@ -1735,7 +1730,7 @@ private:
 
 void State::on_settings_loaded()
 {
-    for (int i = 0; i < *Var::COUNT; ++i) {
+    for (int i = 0; i < std::to_underlying(Var::COUNT); ++i) {
         parse_var(static_cast<Var>(i));
     }
 
@@ -1746,11 +1741,11 @@ void State::on_settings_loaded()
 
     update_valid();
 
-    if (*g_state.selected < 0 || g_state.selected > ConsoleItem::COUNT) {
+    if (std::to_underlying(g_state.selected) < 0 || g_state.selected > ConsoleItem::COUNT) {
         g_state.selected = static_cast<ConsoleItem>(0);
     }
-    while (!g_state.developer && is_developer_console_item(static_cast<ConsoleItem>(*g_state.selected))) {
-        g_state.selected = static_cast<ConsoleItem>((*g_state.selected + 1) % (*ConsoleItem::COUNT + 1));
+    while (!g_state.developer && is_developer_console_item(g_state.selected)) {
+        g_state.selected = static_cast<ConsoleItem>((std::to_underlying(g_state.selected) + 1) % (std::to_underlying(ConsoleItem::COUNT) + 1));
     }
 
     if (App::tray_icon) {
@@ -1771,8 +1766,8 @@ void State::on_restored()
 
 void State::on_developer_changed()
 {
-    while (!g_state.developer && is_developer_console_item(static_cast<ConsoleItem>(*g_state.selected))) {
-        g_state.selected = static_cast<ConsoleItem>((*g_state.selected + 1) % (*ConsoleItem::COUNT + 1));
+    while (!g_state.developer && is_developer_console_item(g_state.selected)) {
+        g_state.selected = static_cast<ConsoleItem>((std::to_underlying(g_state.selected) + 1) % (std::to_underlying(ConsoleItem::COUNT) + 1));
     }
 
     App::console->on_developer_changed();
@@ -1825,7 +1820,7 @@ void State::on_selected_changed(ConsoleItem prev)
 void State::update_valid()
 {
     g_state.valid = (g_state.count > 0);
-    for (int i = 0; (i < *Var::COUNT) && (g_state.valid); ++i) {
+    for (int i = 0; (i < std::to_underlying(Var::COUNT)) && (g_state.valid); ++i) {
         g_state.valid = (g_state.valid && g_state.vars[i]);
     }
     on_valid_updated();
@@ -1834,20 +1829,20 @@ void State::update_valid()
 void State::parse_var(Var var)
 {
     double d;
-    auto p = parse_double(g_state.vars_text[*var], d);
+    auto p = parse_double(g_state.vars_text[std::to_underlying(var)], d);
 
     if (std::isnan(d) || d < 0.0 || *p != L'\0') {
-        g_state.vars[*var] = std::nullopt;
+        g_state.vars[std::to_underlying(var)] = std::nullopt;
         return;
     }
 
-    g_state.vars[*var] = d;
+    g_state.vars[std::to_underlying(var)] = d;
 }
 
 void State::parse_cycle_vars()
 {
     g_state.count = 0;
-    for (int i = 0; i < *CycleVar::COUNT; ++i) {
+    for (int i = 0; i < std::to_underlying(CycleVar::COUNT); ++i) {
         g_state.cycle_vars[i].clear();
         const wchar_t *p = g_state.cycle_vars_text[i];
         do {
