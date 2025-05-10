@@ -1,363 +1,10 @@
 #include <cmath>
 #include <optional>
-#include <vector>
 #include <utility>
 #include <pathcch.h>
-#include <windows.h>
 #include <windns.h>
 #include <hidusage.h>
-
-namespace common {
-
-wchar_t *wcsstrip(wchar_t *s)
-{
-    auto count = std::wcslen(s);
-    if (count == 0) {
-        return s;
-    }
-
-    auto end = s + count - 1;
-    while (end >= s && std::isspace(*end)) {
-        end--;
-    }
-    *(end + 1) = L'\0';
-
-    while ((*s != L'\0') && std::isspace(*s)) {
-        s++;
-    }
-
-    return s;
-}
-
-const wchar_t *parse_double(const wchar_t *s, double &value)
-{
-    wchar_t *end;
-    value = std::wcstod(s, &end);
-    if (end == s) {
-        value = NAN;
-    }
-
-    while (*end != L'\0') {
-        if (!std::isspace(*end)) {
-            break;
-        }
-        ++end;
-    }
-
-    return end;
-}
-
-namespace win32 {
-
-namespace {
-
-using ZwSetTimerResolution_t = NTSTATUS (WINAPI *)(IN ULONG RequestedResolution, IN BOOLEAN Set, OUT PULONG ActualResolution);
-auto ZwSetTimerResolution = reinterpret_cast<ZwSetTimerResolution_t>(GetProcAddress(LoadLibraryW(L"ntdll.dll"), "ZwSetTimerResolution"));
-
-using NtDelayExecution_t = NTSTATUS (WINAPI *)(IN BOOL Alertable, IN PLARGE_INTEGER DelayInterval);
-auto NtDelayExecution = reinterpret_cast<NtDelayExecution_t>(GetProcAddress(LoadLibraryW(L"ntdll.dll"), "NtDelayExecution"));
-
-long long performance_counter_frequency()
-{
-    LARGE_INTEGER f;
-    QueryPerformanceFrequency(&f);
-    return f.QuadPart;
-}
-
-}
-
-constexpr auto VIRTUAL_KEYS = 256;
-
-const auto PERFORMANCE_COUNTER_FREQUENCY = performance_counter_frequency();
-
-void WritePrivateProfileIntW(LPCWSTR lpAppName, LPCWSTR lpKeyName, int nInt, LPCWSTR lpFileName)
-{
-    wchar_t buffer[128];
-    std::swprintf(buffer, std::size(buffer), L"%d", nInt);
-    WritePrivateProfileStringW(lpAppName, lpKeyName, buffer, lpFileName);
-}
-
-long long performance_counter()
-{
-    LARGE_INTEGER i;
-    QueryPerformanceCounter(&i);
-    return i.QuadPart;
-}
-
-void set_timer_resolution(unsigned long hns)
-{
-    ULONG actual;
-    ZwSetTimerResolution(hns, true, &actual);
-}
-
-void delay_execution_by(long long hns)
-{
-    LARGE_INTEGER interval;
-    interval.QuadPart = -1 * hns;
-    NtDelayExecution(false, &interval);
-}
-
-void move_mouse_by(int x, int y)
-{
-    INPUT input;
-    input.type = INPUT_MOUSE;
-    input.mi.dx = x;
-    input.mi.dy = y;
-    input.mi.mouseData = 0;
-    input.mi.dwFlags = MOUSEEVENTF_MOVE;
-    input.mi.time = 0;
-    input.mi.dwExtraInfo = 0;
-    SendInput(1, &input, sizeof(input));
-}
-
-bool is_key_down(int vk)
-{
-    return (GetAsyncKeyState(vk) & 0x8000);
-}
-
-bool get_vk_string(int vk, wchar_t *result, size_t count)
-{
-    UINT scan_code;
-    switch (vk) {
-    case VK_LBUTTON:
-        std::swprintf(result, count, L"Left Mouse Button");
-        return true;
-    case VK_RBUTTON:
-        std::swprintf(result, count, L"Right Mouse Button");
-        return true;
-    case VK_MBUTTON:
-        std::swprintf(result, count, L"Middle Mouse Button");
-        return true;
-    case VK_XBUTTON1:
-        std::swprintf(result, count, L"X1 Mouse Button");
-        return true;
-    case VK_XBUTTON2:
-        std::swprintf(result, count, L"X2 Mouse Button");
-        return true;
-    case VK_LEFT: case VK_UP: case VK_RIGHT: case VK_DOWN: case VK_PRIOR: case VK_NEXT: case VK_END: case VK_HOME: case VK_INSERT: case VK_DELETE: case VK_DIVIDE: case VK_NUMLOCK:
-        scan_code = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC) | 0x100;
-        break;
-    default:
-        scan_code = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
-        break;
-    }
-    return GetKeyNameTextW(scan_code << 16, result, count);
-}
-
-size_t get_raw_input_msgs(const RAWINPUT &input, USHORT (&vks)[5], UINT (&msgs)[5])
-{
-    constexpr int MOUSE_DOWN[5] = {RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_2_DOWN, RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_5_DOWN};
-    constexpr int MOUSE_UP[5] = {RI_MOUSE_BUTTON_1_UP, RI_MOUSE_BUTTON_2_UP, RI_MOUSE_BUTTON_3_UP, RI_MOUSE_BUTTON_4_UP, RI_MOUSE_BUTTON_5_UP};
-    constexpr int MOUSE_VK[5] = {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2};
-
-    size_t count = 0;
-    switch (input.header.dwType) {
-    case RIM_TYPEMOUSE:
-        for (int i = 0; i < std::size(MOUSE_DOWN); ++i) {
-            if (input.data.mouse.usButtonFlags & MOUSE_DOWN[i]) {
-                vks[count] = MOUSE_VK[i];
-                msgs[count] = WM_KEYDOWN;
-                ++count;
-            } else if (input.data.mouse.usButtonFlags & MOUSE_UP[i]) {
-                vks[count] = MOUSE_VK[i];
-                msgs[count] = WM_KEYUP;
-                ++count;
-            }
-        }
-        break;
-    case RIM_TYPEKEYBOARD:
-        switch (input.data.keyboard.VKey) {
-        case VK_CONTROL:
-            if (input.header.hDevice == nullptr) {
-                vks[count] = VK_ZOOM;
-            } else {
-                vks[count] = (input.data.keyboard.Flags & RI_KEY_E0 ? VK_RCONTROL : VK_LCONTROL);
-            }
-            break;
-        case VK_MENU:
-            vks[count] = (input.data.keyboard.Flags & RI_KEY_E0 ? VK_RMENU : VK_LMENU);
-            break;
-        case VK_SHIFT:
-            vks[count] = (input.data.keyboard.MakeCode == 0x36 ? VK_RSHIFT : VK_LSHIFT);
-            break;
-        default:
-            vks[count] = input.data.keyboard.VKey;
-            break;
-        }
-        msgs[count] = input.data.keyboard.Message;
-        ++count;
-        break;
-    }
-    return count;
-}
-
-namespace {
-
-struct ConsoleBase
-{
-    HANDLE handle;
-
-    ConsoleBase(HANDLE handle) : handle(handle) {}
-
-    DWORD get_mode()
-    {
-        DWORD mode;
-        GetConsoleMode(handle, &mode);
-        return mode;
-    }
-
-    void set_mode(DWORD mode)
-    {
-        SetConsoleMode(handle, mode);
-    }
-};
-
-}
-
-struct ConsoleInput :
-    ConsoleBase
-{
-    ConsoleInput(HANDLE handle) : ConsoleBase(handle) {}
-
-    size_t consume_input_events(INPUT_RECORD *buffer, DWORD count)
-    {
-        DWORD available;
-        GetNumberOfConsoleInputEvents(handle, &available);
-        if (available == 0) {
-            return 0;
-        }
-        count = std::min(available, count);
-        ReadConsoleInputW(handle, buffer, count, &available);
-        return count;
-    }
-
-    void write_text(const wchar_t *s)
-    {
-        auto count = std::wcslen(s);
-        INPUT_RECORD records[count];
-        for (int i = 0; i < count; ++i) {
-            records[i].EventType = KEY_EVENT;
-            records[i].Event.KeyEvent.bKeyDown = true;
-            records[i].Event.KeyEvent.wRepeatCount = 1;
-            records[i].Event.KeyEvent.wVirtualKeyCode = 0;
-            records[i].Event.KeyEvent.wVirtualScanCode = 0;
-            records[i].Event.KeyEvent.uChar.UnicodeChar = s[i];
-            records[i].Event.KeyEvent.dwControlKeyState = 0;
-        }
-
-        DWORD written;
-        WriteConsoleInput(handle, records, count, &written);
-    }
-
-    void read_text(wchar_t *buffer, size_t count)
-    {
-        DWORD read;
-        ReadConsoleW(handle, buffer, count, &read, nullptr);
-
-        if (buffer[read - 1] == L'\n') {
-            buffer[read - 2] = L'\0';
-            return;
-        }
-
-        buffer[read - 1] = L'\0';
-
-        wchar_t rest[1024];
-        do {
-            ReadConsoleW(handle, rest, std::size(rest), &read, nullptr);
-        } while (rest[read - 1] != L'\n');
-    }
-};
-
-struct ConsoleOutput :
-    ConsoleBase
-{
-    ConsoleOutput(HANDLE handle) : ConsoleBase(handle) {}
-
-    void set_as_active_screen_buffer()
-    {
-        SetConsoleActiveScreenBuffer(handle);
-    }
-
-    CONSOLE_CURSOR_INFO get_cursor_info()
-    {
-        CONSOLE_CURSOR_INFO info;
-        GetConsoleCursorInfo(handle, &info);
-        return info;
-    }
-
-    void set_cursor_info(const CONSOLE_CURSOR_INFO &info)
-    {
-        SetConsoleCursorInfo(handle, &info);
-    }
-
-    CONSOLE_SCREEN_BUFFER_INFOEX get_screen_buffer_info()
-    {
-        CONSOLE_SCREEN_BUFFER_INFOEX info;
-        info.cbSize = sizeof(info);
-        GetConsoleScreenBufferInfoEx(handle, &info);
-        return info;
-    }
-
-    void set_window_info(bool absolute, const SMALL_RECT &window)
-    {
-        SetConsoleWindowInfo(handle, absolute, &window);
-    }
-
-    void set_buffer_size(COORD size)
-    {
-        SetConsoleScreenBufferSize(handle, size);
-    }
-
-    void set_cursor_position(COORD position)
-    {
-        SetConsoleCursorPosition(handle, position);
-    }
-
-    void set_text_attributes(WORD attributes)
-    {
-        SetConsoleTextAttribute(handle, attributes);
-    }
-
-    void fill(wchar_t c, COORD position, size_t count)
-    {
-        DWORD written;
-        FillConsoleOutputCharacterW(handle, c, count, position, &written);
-    }
-
-    void fill_attribute(WORD attribute, COORD position, size_t count)
-    {
-        DWORD written;
-        FillConsoleOutputAttribute(handle, attribute, count, position, &written);
-    }
-
-    void write(const wchar_t *s, size_t count)
-    {
-        WriteConsoleW(handle, s, count, nullptr, nullptr);
-    }
-
-    void write_text(const wchar_t *s)
-    {
-        WriteConsoleW(handle, s, std::wcslen(s), nullptr, nullptr);
-    }
-
-    void write_info(const wchar_t *s, size_t count, CONSOLE_SCREEN_BUFFER_INFOEX &info)
-    {
-        count = std::min(count, size_t(info.dwSize.X - info.dwCursorPosition.X));
-        WriteConsoleW(handle, s, count, nullptr, nullptr);
-        info.dwCursorPosition.X += count;
-    }
-
-    void write_text_info(const wchar_t *s, CONSOLE_SCREEN_BUFFER_INFOEX &info)
-    {
-        size_t count = std::min(std::wcslen(s), size_t(info.dwSize.X - info.dwCursorPosition.X));
-        WriteConsoleW(handle, s, count, nullptr, nullptr);
-        info.dwCursorPosition.X += count;
-    }
-};
-
-}
-
-}
+#include "common.hpp"
 
 using namespace common;
 
@@ -774,7 +421,7 @@ struct MouseMoveCalculator
             last_down[i] = input.down[g_state.binds[i]];
         }
 
-        if (!(input.down[g_state.binds[std::to_underlying(Bind::LEFT)]] ^ input.down[g_state.binds[std::to_underlying(Bind::RIGHT)]]) || time - last_time < win32::PERFORMANCE_COUNTER_FREQUENCY * (1.0 / *g_state.vars[std::to_underlying(Var::RATE)])) {
+        if (!(input.down[g_state.binds[std::to_underlying(Bind::LEFT)]] ^ input.down[g_state.binds[std::to_underlying(Bind::RIGHT)]]) || time - last_time < win32::performance_counter_frequency() * (1.0 / *g_state.vars[std::to_underlying(Var::RATE)])) {
             return 0;
         }
 
@@ -789,7 +436,7 @@ struct MouseMoveCalculator
                 (cycle_vars[std::to_underlying(CycleVar::YAWSPEED)] / (cycle_vars[std::to_underlying(CycleVar::SENSITIVITY)] * cycle_vars[std::to_underlying(CycleVar::YAW)])) *
                 (input.down[g_state.binds[std::to_underlying(Bind::SPEED)]] ? cycle_vars[std::to_underlying(CycleVar::ANGLESPEEDKEY)] : 1.0) *
                 (time - last_time)
-            ) / win32::PERFORMANCE_COUNTER_FREQUENCY;
+            ) / win32::performance_counter_frequency();
 
         auto amount = static_cast<long long>(remaining);
         remaining -= amount;
@@ -1351,81 +998,6 @@ private:
     }
 };
 
-struct CursorMonitor
-{
-    CursorMonitor()
-    {
-        SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_HIDE, nullptr, proc, 0, 0, WINEVENT_OUTOFCONTEXT);
-        SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE, nullptr, proc, 0, 0, WINEVENT_OUTOFCONTEXT);
-
-        visible_ = check_visible();
-    }
-
-    auto visible()
-    {
-        return visible_;
-    }
-
-private:
-    static void proc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD idEventThread, DWORD dwmsEventTime)
-    {
-        if (idObject != OBJID_CURSOR) {
-            return;
-        }
-        visible_ = check_visible();
-    }
-
-    static bool check_visible()
-    {
-        CURSORINFO info = {};
-        info.cbSize = sizeof(info);
-        GetCursorInfo(&info);
-        if (!(info.flags & CURSOR_SHOWING)) {
-            return false;
-        }
-
-        ICONINFOEXW icon_info = {};
-        icon_info.cbSize = sizeof(ICONINFOEXW);
-        GetIconInfoExW(info.hCursor, &icon_info);
-        return icon_info.hbmColor != nullptr || *icon_info.szModName != L'\0';
-    }
-
-    static inline bool visible_;
-};
-
-struct CtrlSignalHandler
-{
-    CtrlSignalHandler(HWND hwnd_)
-    {
-        hwnd = hwnd_;
-        event = CreateEventW(nullptr, false, false, nullptr);
-
-        SetConsoleCtrlHandler(proc, true);
-    }
-
-    void done()
-    {
-        SetEvent(event);
-    }
-
-private:
-    static BOOL proc(DWORD dwCtrlType)
-    {
-        switch (dwCtrlType) {
-        case CTRL_C_EVENT:
-        case CTRL_BREAK_EVENT:
-        case CTRL_CLOSE_EVENT:
-            PostMessageW(hwnd, WM_QUIT, 0, 0);
-            WaitForSingleObject(event, INFINITE);
-            return true;
-        }
-        return false;
-    }
-
-    static inline HWND hwnd;
-    static inline HANDLE event;
-};
-
 struct App
 {
     inline static std::optional<Input> input;
@@ -1490,8 +1062,9 @@ struct App
         console_window.emplace(version_info, icon);
 
         MouseMoveCalculator mouse_move_calculator;
-        CursorMonitor cursor_monitor;
-        CtrlSignalHandler ctrl_signal_handler(hwnd);
+
+        win32::CursorVisibilityObserver cursor_visibility_observer;
+        win32::CtrlSignalHandler ctrl_signal_handler(hwnd);
 
         ini_load_settings(ini_path, version_info.name);
         g_state.on_settings_loaded();
@@ -1521,7 +1094,7 @@ struct App
                 !console->editing &&
                 g_state.switches[std::to_underlying(Switch::ENABLED)] &&
                 g_state.valid &&
-                !cursor_monitor.visible();
+                !cursor_visibility_observer.visible();
 
             if (!active) {
                 if (last_active) {
