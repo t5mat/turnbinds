@@ -991,6 +991,12 @@ void State::parse_var(Var var)
             return;
         }
         break;
+    case Var::SLEEP:
+        if (d >= 1000000.0) {
+            g_state.vars[std::to_underlying(var)] = std::nullopt;
+            return;
+        }
+        break;
     }
 
     g_state.vars[std::to_underlying(var)] = d;
