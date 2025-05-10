@@ -6,6 +6,7 @@
 #include <hidusage.h>
 #include "common.hpp"
 #include "resources.hpp"
+#include "config.hpp"
 
 using namespace common;
 
@@ -190,8 +191,8 @@ struct State
 
     std::optional<WINDOWPLACEMENT> placement;
 
-    void on_settings_loaded();
-    void on_settings_save();
+    void on_config_loaded(Config &config);
+    void on_config_save(Config &config);
     void on_developer_changed();
     void on_var_changed(Var var);
     void on_cycle_vars_changed();
@@ -463,7 +464,7 @@ struct ConsoleWindow
         SetWindowLong(hwnd, GWL_STYLE, GetWindowLong(hwnd, GWL_STYLE) & ~WS_SIZEBOX & ~WS_MAXIMIZEBOX);
     }
 
-    void on_settings_loaded()
+    void on_config_loaded()
     {
         if (g_state.placement) {
             SetWindowPlacement(hwnd, &(*g_state.placement));
@@ -472,7 +473,7 @@ struct ConsoleWindow
         ShowWindow(hwnd, SW_SHOWNORMAL);
     }
 
-    void on_settings_save()
+    void on_config_save()
     {
         g_state.placement = {};
         GetWindowPlacement(hwnd, &(*g_state.placement));
@@ -529,7 +530,7 @@ struct Console
         in.set_mode(initial_in_mode);
     }
 
-    void on_settings_loaded()
+    void on_config_loaded()
     {
         resize();
     }
@@ -1041,8 +1042,8 @@ struct App
         win32::CursorVisibilityObserver cursor_visibility_observer;
         win32::CtrlSignalHandler ctrl_signal_handler(hwnd);
 
-        ini_load_settings(ini_path, version_info.name);
-        g_state.on_settings_loaded();
+        Config config(ini_path, version_info.name);
+        g_state.on_config_loaded(config);
 
         SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
         win32::set_timer_resolution(1);
@@ -1095,59 +1096,32 @@ struct App
 
         console.reset();
 
-        g_state.on_settings_save();
-        ini_save_settings(ini_path, version_info.name);
+        g_state.on_config_save(config);
+        config.save(ini_path, version_info.name);
 
         ctrl_signal_handler.done();
     }
-
-    static void ini_load_settings(const wchar_t *path, const wchar_t *section)
-    {
-        g_state.developer = (GetPrivateProfileIntW(section, L"developer", 0, path) == 1);
-        g_state.binds[std::to_underlying(Bind::LEFT)] = GetPrivateProfileIntW(section, L"bind_left", VK_LBUTTON, path);
-        g_state.binds[std::to_underlying(Bind::RIGHT)] = GetPrivateProfileIntW(section, L"bind_right", VK_RBUTTON, path);
-        g_state.binds[std::to_underlying(Bind::SPEED)] = GetPrivateProfileIntW(section, L"bind_speed", VK_LSHIFT, path);
-        g_state.binds[std::to_underlying(Bind::CYCLE)] = GetPrivateProfileIntW(section, L"bind_cycle", VK_XBUTTON1, path);
-        GetPrivateProfileStringW(section, L"rate", L"1000", g_state.vars_text[std::to_underlying(Var::RATE)], std::size(g_state.vars_text[std::to_underlying(Var::RATE)]), path);
-        GetPrivateProfileStringW(section, L"sleep", L"3500", g_state.vars_text[std::to_underlying(Var::SLEEP)], std::size(g_state.vars_text[std::to_underlying(Var::SLEEP)]), path);
-        GetPrivateProfileStringW(section, L"cl_yawspeed", L"75 120 210", g_state.cycle_vars_text[std::to_underlying(CycleVar::YAWSPEED)], std::size(g_state.cycle_vars_text[std::to_underlying(CycleVar::YAWSPEED)]), path);
-        GetPrivateProfileStringW(section, L"sensitivity", L"1.0", g_state.cycle_vars_text[std::to_underlying(CycleVar::SENSITIVITY)], std::size(g_state.cycle_vars_text[std::to_underlying(CycleVar::SENSITIVITY)]), path);
-        GetPrivateProfileStringW(section, L"cl_anglespeedkey", L"0.67", g_state.cycle_vars_text[std::to_underlying(CycleVar::ANGLESPEEDKEY)], std::size(g_state.cycle_vars_text[std::to_underlying(CycleVar::ANGLESPEEDKEY)]), path);
-        GetPrivateProfileStringW(section, L"m_yaw", L"0.022", g_state.cycle_vars_text[std::to_underlying(CycleVar::YAW)], std::size(g_state.cycle_vars_text[std::to_underlying(CycleVar::YAW)]), path);
-        g_state.switches[std::to_underlying(Switch::ENABLED)] = (GetPrivateProfileIntW(section, L"enabled", 1, path) == 1);
-        g_state.switches[std::to_underlying(Switch::RAW_INPUT)] = (GetPrivateProfileIntW(section, L"raw_input", 0, path) == 1);
-        g_state.current = GetPrivateProfileIntW(section, L"current", 0, path);
-        g_state.selected = static_cast<ConsoleItem>(GetPrivateProfileIntW(section, L"selected", 0, path));
-
-        WINDOWPLACEMENT placement;
-        if (GetPrivateProfileStructW(section, L"placement", &placement, sizeof(placement), path)) {
-            g_state.placement = placement;
-        }
-    }
-
-    static void ini_save_settings(const wchar_t *path, const wchar_t *section)
-    {
-        win32::WritePrivateProfileIntW(section, L"developer", g_state.developer, path);
-        win32::WritePrivateProfileIntW(section, L"bind_left", g_state.binds[std::to_underlying(Bind::LEFT)], path);
-        win32::WritePrivateProfileIntW(section, L"bind_right", g_state.binds[std::to_underlying(Bind::RIGHT)], path);
-        win32::WritePrivateProfileIntW(section, L"bind_speed", g_state.binds[std::to_underlying(Bind::SPEED)], path);
-        win32::WritePrivateProfileIntW(section, L"bind_cycle", g_state.binds[std::to_underlying(Bind::CYCLE)], path);
-        WritePrivateProfileStringW(section, L"rate", g_state.vars_text[std::to_underlying(Var::RATE)], path);
-        WritePrivateProfileStringW(section, L"sleep", g_state.vars_text[std::to_underlying(Var::SLEEP)], path);
-        WritePrivateProfileStringW(section, L"cl_yawspeed", g_state.cycle_vars_text[std::to_underlying(CycleVar::YAWSPEED)], path);
-        WritePrivateProfileStringW(section, L"sensitivity", g_state.cycle_vars_text[std::to_underlying(CycleVar::SENSITIVITY)], path);
-        WritePrivateProfileStringW(section, L"cl_anglespeedkey", g_state.cycle_vars_text[std::to_underlying(CycleVar::ANGLESPEEDKEY)], path);
-        WritePrivateProfileStringW(section, L"m_yaw", g_state.cycle_vars_text[std::to_underlying(CycleVar::YAW)], path);
-        win32::WritePrivateProfileIntW(section, L"enabled", g_state.switches[std::to_underlying(Switch::ENABLED)], path);
-        win32::WritePrivateProfileIntW(section, L"raw_input", g_state.switches[std::to_underlying(Switch::RAW_INPUT)], path);
-        win32::WritePrivateProfileIntW(section, L"current", g_state.current, path);
-        win32::WritePrivateProfileIntW(section, L"selected", std::to_underlying(g_state.selected), path);
-        WritePrivateProfileStructW(section, L"placement", &(*g_state.placement), sizeof(*g_state.placement), path);
-    }
 };
 
-void State::on_settings_loaded()
+void State::on_config_loaded(Config &config)
 {
+    g_state.developer = config.developer;
+    g_state.binds[std::to_underlying(Bind::LEFT)] = config.bind_left;
+    g_state.binds[std::to_underlying(Bind::RIGHT)] = config.bind_right;
+    g_state.binds[std::to_underlying(Bind::SPEED)] = config.bind_speed;
+    g_state.binds[std::to_underlying(Bind::CYCLE)] = config.bind_cycle;
+    std::wcscpy(g_state.vars_text[std::to_underlying(Var::RATE)], config.rate);
+    std::wcscpy(g_state.vars_text[std::to_underlying(Var::SLEEP)], config.sleep);
+    std::wcscpy(g_state.cycle_vars_text[std::to_underlying(CycleVar::YAWSPEED)], config.cl_yawspeed);
+    std::wcscpy(g_state.cycle_vars_text[std::to_underlying(CycleVar::SENSITIVITY)], config.sensitivity);
+    std::wcscpy(g_state.cycle_vars_text[std::to_underlying(CycleVar::ANGLESPEEDKEY)], config.cl_anglespeedkey);
+    std::wcscpy(g_state.cycle_vars_text[std::to_underlying(CycleVar::YAW)], config.m_yaw);
+    g_state.switches[std::to_underlying(Switch::ENABLED)] = config.enabled;
+    g_state.switches[std::to_underlying(Switch::RAW_INPUT)] = config.raw_input;
+    g_state.current = config.current;
+    g_state.selected = static_cast<ConsoleItem>(config.selected);
+    g_state.placement = config.placement;
+
     for (int i = 0; i < std::to_underlying(Var::COUNT); ++i) {
         parse_var(static_cast<Var>(i));
     }
@@ -1166,13 +1140,30 @@ void State::on_settings_loaded()
         g_state.selected = static_cast<ConsoleItem>((std::to_underlying(g_state.selected) + 1) % (std::to_underlying(ConsoleItem::COUNT) + 1));
     }
 
-    App::console->on_settings_loaded();
-    App::console_window->on_settings_loaded();
+    App::console->on_config_loaded();
+    App::console_window->on_config_loaded();
 }
 
-void State::on_settings_save()
+void State::on_config_save(Config &config)
 {
-    App::console_window->on_settings_save();
+    App::console_window->on_config_save();
+
+    config.developer = g_state.developer;
+    config.bind_left = g_state.binds[std::to_underlying(Bind::LEFT)];
+    config.bind_right = g_state.binds[std::to_underlying(Bind::RIGHT)];
+    config.bind_speed = g_state.binds[std::to_underlying(Bind::SPEED)];
+    config.bind_cycle = g_state.binds[std::to_underlying(Bind::CYCLE)];
+    std::wcscpy(config.rate, g_state.vars_text[std::to_underlying(Var::RATE)]);
+    std::wcscpy(config.sleep, g_state.vars_text[std::to_underlying(Var::SLEEP)]);
+    std::wcscpy(config.cl_yawspeed, g_state.cycle_vars_text[std::to_underlying(CycleVar::YAWSPEED)]);
+    std::wcscpy(config.sensitivity, g_state.cycle_vars_text[std::to_underlying(CycleVar::SENSITIVITY)]);
+    std::wcscpy(config.cl_anglespeedkey, g_state.cycle_vars_text[std::to_underlying(CycleVar::ANGLESPEEDKEY)]);
+    std::wcscpy(config.m_yaw, g_state.cycle_vars_text[std::to_underlying(CycleVar::YAW)]);
+    config.enabled = g_state.switches[std::to_underlying(Switch::ENABLED)];
+    config.raw_input = g_state.switches[std::to_underlying(Switch::RAW_INPUT)];
+    config.current = g_state.current;
+    config.selected = std::to_underlying(g_state.selected);
+    config.placement = g_state.placement;
 }
 
 void State::on_developer_changed()
