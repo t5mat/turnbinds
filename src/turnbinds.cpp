@@ -970,15 +970,11 @@ struct Console
                     case VK_DOWN:
                         if (events[i].Event.KeyEvent.bKeyDown) {
                             bool down = (events[i].Event.KeyEvent.wVirtualKeyCode == VK_DOWN);
-                            if (events[i].Event.KeyEvent.bKeyDown) {
-                                auto prev = g_state.selected;
-
-                                do {
-                                    g_state.selected = static_cast<ConsoleItem>((down ? (std::to_underlying(g_state.selected) + 1) : (std::to_underlying(g_state.selected) - 1 + std::to_underlying(ConsoleItem::COUNT) + 1)) % (std::to_underlying(ConsoleItem::COUNT) + 1));
-                                } while (!g_state.developer && is_developer_console_item(g_state.selected));
-
-                                g_state.on_selected_changed(prev);
-                            }
+                            auto prev = g_state.selected;
+                            do {
+                                g_state.selected = static_cast<ConsoleItem>((down ? (std::to_underlying(g_state.selected) + 1) : (std::to_underlying(g_state.selected) - 1 + std::to_underlying(ConsoleItem::COUNT) + 1)) % (std::to_underlying(ConsoleItem::COUNT) + 1));
+                            } while (!g_state.developer && is_developer_console_item(g_state.selected));
+                            g_state.on_selected_changed(prev);
                         }
                         break;
                     case VK_LEFT:
