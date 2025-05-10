@@ -843,25 +843,71 @@ private:
     std::vector<char> data;
 };
 
+struct ConsoleWindow
+{
+    ConsoleWindow(const VersionInfo &version_info, HICON icon) :
+        version_info(version_info),
+        hwnd(GetConsoleWindow())
+    {
+        SendMessage(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(icon));
+        SendMessage(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(icon));
+
+        SetWindowLong(hwnd, GWL_STYLE, GetWindowLong(hwnd, GWL_STYLE) & ~WS_SIZEBOX & ~WS_MAXIMIZEBOX);
+    }
+
+    void on_settings_loaded()
+    {
+        if (g_state.placement) {
+            SetWindowPlacement(hwnd, &(*g_state.placement));
+        }
+        reset_title();
+        ShowWindow(hwnd, SW_SHOWNORMAL);
+    }
+
+    void on_settings_save()
+    {
+        g_state.placement = {};
+        GetWindowPlacement(hwnd, &(*g_state.placement));
+    }
+
+    void on_switch_changed(Switch switch_)
+    {
+        switch (switch_) {
+        case Switch::ENABLED:
+            reset_title();
+            break;
+        }
+    }
+
+    void on_valid_updated()
+    {
+        reset_title();
+    }
+
+private:
+    const VersionInfo &version_info;
+
+    HWND hwnd;
+
+    void reset_title()
+    {
+        wchar_t buffer[128];
+        std::swprintf(buffer, std::size(buffer), L"%s%s", version_info.title, (!g_state.valid ? L" (error)" : (g_state.switches[std::to_underlying(Switch::ENABLED)] ? L"" : L" (disabled)")));
+        SetConsoleTitleW(buffer);
+    }
+};
+
 struct Console
 {
-    HWND hwnd;
     win32::ConsoleOutput out;
     win32::ConsoleInput in;
     bool editing = false;
 
     Console(const VersionInfo &version_info) :
-        hwnd(GetConsoleWindow()),
         out(CreateConsoleScreenBuffer(GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE | FILE_SHARE_READ, nullptr, CONSOLE_TEXTMODE_BUFFER, nullptr)),
         in(GetStdHandle(STD_INPUT_HANDLE)),
         version_info(version_info)
     {
-        auto icon = static_cast<HICON>(::LoadImageW(GetModuleHandle(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, 0, 0, LR_DEFAULTCOLOR));
-        SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)icon);
-        SendMessage(hwnd, WM_SETICON, ICON_BIG, (LPARAM)icon);
-
-        SetWindowLong(hwnd, GWL_STYLE, GetWindowLong(hwnd, GWL_STYLE) & ~WS_SIZEBOX & ~WS_MAXIMIZEBOX);
-
         initial_in_mode = in.get_mode();
 
         out.set_mode(ENABLE_PROCESSED_OUTPUT);
@@ -878,18 +924,6 @@ struct Console
     void on_settings_loaded()
     {
         resize();
-
-        if (g_state.placement) {
-            SetWindowPlacement(hwnd, &(*g_state.placement));
-        }
-        reset_title();
-        ShowWindow(hwnd, SW_SHOWNORMAL);
-    }
-
-    void on_settings_save()
-    {
-        g_state.placement = {};
-        GetWindowPlacement(hwnd, &(*g_state.placement));
     }
 
     void on_developer_changed()
@@ -901,7 +935,6 @@ struct Console
     {
         switch (switch_) {
         case Switch::ENABLED:
-            reset_title();
             redraw_item_value(ConsoleItem::ENABLED);
             break;
         case Switch::RAW_INPUT:
@@ -916,11 +949,6 @@ struct Console
         redraw_item_value(ConsoleItem::SENSITIVITY);
         redraw_item_value(ConsoleItem::CL_ANGLESPEEDKEY);
         redraw_item_value(ConsoleItem::M_YAW);
-    }
-
-    void on_valid_updated()
-    {
-        reset_title();
     }
 
     void on_selected_changed(ConsoleItem prev)
@@ -1079,13 +1107,6 @@ private:
 
     COORD positions_selector[std::to_underlying(ConsoleItem::COUNT)];
     COORD positions_value[std::to_underlying(ConsoleItem::COUNT)];
-
-    void reset_title()
-    {
-        wchar_t buffer[128];
-        std::swprintf(buffer, std::size(buffer), L"%s%s", version_info.title, (!g_state.valid ? L" (error)" : (g_state.switches[std::to_underlying(Switch::ENABLED)] ? L"" : L" (disabled)")));
-        SetConsoleTitleW(buffer);
-    }
 
     void resize()
     {
@@ -1423,6 +1444,7 @@ struct App
 {
     inline static std::optional<Input> input;
     inline static std::optional<Console> console;
+    inline static std::optional<ConsoleWindow> console_window;
 
     static void run()
     {
@@ -1446,6 +1468,7 @@ struct App
         }
 
         version_info.emplace(image_path);
+        auto icon = static_cast<HICON>(::LoadImageW(GetModuleHandle(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, 0, 0, LR_DEFAULTCOLOR));
 
         std::wcscpy(ini_path, image_path);
         PathCchRenameExtension(ini_path, std::size(ini_path), L"ini");
@@ -1455,6 +1478,7 @@ struct App
         input.emplace(hwnd);
 
         console.emplace(*version_info);
+        console_window.emplace(*version_info, icon);
 
         MouseMoveCalculator mouse_move_calculator;
         CursorMonitor cursor_monitor;
@@ -1602,11 +1626,12 @@ void State::on_settings_loaded()
     }
 
     App::console->on_settings_loaded();
+    App::console_window->on_settings_loaded();
 }
 
 void State::on_settings_save()
 {
-    App::console->on_settings_save();
+    App::console_window->on_settings_save();
 }
 
 void State::on_developer_changed()
@@ -1639,6 +1664,7 @@ void State::on_switch_changed(Switch switch_)
 {
     App::input->on_switch_changed(switch_);
     App::console->on_switch_changed(switch_);
+    App::console_window->on_switch_changed(switch_);
 }
 
 void State::on_current_changed()
@@ -1648,7 +1674,7 @@ void State::on_current_changed()
 
 void State::on_valid_updated()
 {
-    App::console->on_valid_updated();
+    App::console_window->on_valid_updated();
 }
 
 void State::on_selected_changed(ConsoleItem prev)
