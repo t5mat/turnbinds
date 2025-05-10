@@ -7,6 +7,7 @@
 #include "common.hpp"
 #include "resources.hpp"
 #include "config.hpp"
+#include "mouse_move_state.hpp"
 
 using namespace common;
 
@@ -397,59 +398,6 @@ private:
         devices[1].hwndTarget = nullptr;
         RegisterRawInputDevices(devices, std::size(devices), sizeof(*devices));
     }
-};
-
-struct MouseMoveCalculator
-{
-    long long update(bool reset, Input &input)
-    {
-        if (reset) {
-            last_down = {};
-        }
-
-        if (!last_down[std::to_underlying(Bind::CYCLE)] && input.down[g_state.binds[std::to_underlying(Bind::CYCLE)]]) {
-            g_state.current = (g_state.current + 1) % g_state.count;
-            g_state.on_current_changed();
-        }
-
-        auto time = win32::performance_counter();
-
-        if ((last_down[std::to_underlying(Bind::LEFT)] ^ input.down[g_state.binds[std::to_underlying(Bind::LEFT)]]) || (last_down[std::to_underlying(Bind::RIGHT)] ^ input.down[g_state.binds[std::to_underlying(Bind::RIGHT)]])) {
-            last_time = time;
-            remaining = 0.0;
-        }
-
-        for (int i = 0; i < std::size(last_down); ++i) {
-            last_down[i] = input.down[g_state.binds[i]];
-        }
-
-        if (!(input.down[g_state.binds[std::to_underlying(Bind::LEFT)]] ^ input.down[g_state.binds[std::to_underlying(Bind::RIGHT)]]) || time - last_time < win32::performance_counter_frequency() * (1.0 / *g_state.vars[std::to_underlying(Var::RATE)])) {
-            return 0;
-        }
-
-        double cycle_vars[std::to_underlying(CycleVar::COUNT)];
-        for (int i = 0; i < std::size(cycle_vars); ++i) {
-            cycle_vars[i] = g_state.cycle_vars[i][g_state.current % g_state.cycle_vars[i].size()];
-        }
-
-        remaining +=
-            (
-                (int(input.down[g_state.binds[std::to_underlying(Bind::LEFT)]]) * -1 + int(input.down[g_state.binds[std::to_underlying(Bind::RIGHT)]])) *
-                (cycle_vars[std::to_underlying(CycleVar::YAWSPEED)] / (cycle_vars[std::to_underlying(CycleVar::SENSITIVITY)] * cycle_vars[std::to_underlying(CycleVar::YAW)])) *
-                (input.down[g_state.binds[std::to_underlying(Bind::SPEED)]] ? cycle_vars[std::to_underlying(CycleVar::ANGLESPEEDKEY)] : 1.0) *
-                (time - last_time)
-            ) / win32::performance_counter_frequency();
-
-        auto amount = static_cast<long long>(remaining);
-        remaining -= amount;
-        last_time = time;
-        return amount;
-    }
-
-private:
-    long long last_time;
-    double remaining;
-    std::array<bool, std::to_underlying(Bind::COUNT)> last_down;
 };
 
 struct ConsoleWindow
@@ -1037,8 +985,6 @@ struct App
         console.emplace(version_info);
         console_window.emplace(version_info, icon);
 
-        MouseMoveCalculator mouse_move_calculator;
-
         win32::CursorVisibilityObserver cursor_visibility_observer;
         win32::CtrlSignalHandler ctrl_signal_handler(hwnd);
 
@@ -1049,8 +995,10 @@ struct App
         win32::set_timer_resolution(1);
 
         bool active = false;
+        MouseMoveState mouse_move_state;
 
         do {
+            auto prev_input_down = input->down;
             input->run();
 
         peek:
@@ -1065,7 +1013,7 @@ struct App
 
             console->run(hwnd, *input);
 
-            auto last_active = active;
+            auto prev_active = active;
             active =
                 !console->editing &&
                 g_state.switches[std::to_underlying(Switch::ENABLED)] &&
@@ -1073,7 +1021,7 @@ struct App
                 !cursor_visibility_observer.visible();
 
             if (!active) {
-                if (last_active) {
+                if (prev_active) {
                     input->disable_binds();
                 }
 
@@ -1082,11 +1030,25 @@ struct App
                 continue;
             }
 
-            if (!last_active) {
+            if (!prev_active) {
                 input->enable_binds();
             }
 
-            auto amount = mouse_move_calculator.update(!last_active, *input);
+            if (!prev_input_down[g_state.binds[std::to_underlying(Bind::CYCLE)]] && input->down[g_state.binds[std::to_underlying(Bind::CYCLE)]]) {
+                g_state.current = (g_state.current + 1) % g_state.count;
+                g_state.on_current_changed();
+            }
+
+            auto amount = mouse_move_state.update(
+                !prev_active,
+                input->down[g_state.binds[std::to_underlying(Bind::LEFT)]],
+                input->down[g_state.binds[std::to_underlying(Bind::RIGHT)]],
+                input->down[g_state.binds[std::to_underlying(Bind::SPEED)]],
+                *g_state.vars[std::to_underlying(Var::RATE)],
+                g_state.cycle_vars[std::to_underlying(CycleVar::YAWSPEED)][g_state.current % g_state.cycle_vars[std::to_underlying(CycleVar::YAWSPEED)].size()],
+                g_state.cycle_vars[std::to_underlying(CycleVar::ANGLESPEEDKEY)][g_state.current % g_state.cycle_vars[std::to_underlying(CycleVar::ANGLESPEEDKEY)].size()],
+                g_state.cycle_vars[std::to_underlying(CycleVar::SENSITIVITY)][g_state.current % g_state.cycle_vars[std::to_underlying(CycleVar::SENSITIVITY)].size()],
+                g_state.cycle_vars[std::to_underlying(CycleVar::YAW)][g_state.current % g_state.cycle_vars[std::to_underlying(CycleVar::YAW)].size()]);
             if (amount != 0) {
                 win32::move_mouse_by(amount, 0);
             }
