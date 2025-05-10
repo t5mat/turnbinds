@@ -169,7 +169,7 @@ struct State
 {
     bool developer;
 
-    UINT binds[std::to_underlying(Bind::COUNT)];
+    int binds[std::to_underlying(Bind::COUNT)];
     std::optional<double> vars[std::to_underlying(Var::COUNT)];
     std::vector<double> cycle_vars[std::to_underlying(CycleVar::COUNT)];
     bool switches[std::to_underlying(Switch::COUNT)];
@@ -198,67 +198,6 @@ struct State
     void parse_var(Var var);
     void parse_cycle_vars();
 } g_state;
-
-struct Input
-{
-    std::array<bool, win32::VIRTUAL_KEYS> down;
-    bool capturing = false;
-    USHORT captured;
-    bool binds = false;
-
-    void start_capturing()
-    {
-        capturing = true;
-
-        for (int i = 0; i < std::size(down); ++i) {
-            down[i] = win32::is_key_down(i);
-        }
-    }
-
-    void enable_binds()
-    {
-        binds = true;
-
-        for (int i = 0; i < std::size(g_state.binds); ++i) {
-            down[g_state.binds[i]] = win32::is_key_down(g_state.binds[i]);
-        }
-    }
-
-    void disable_binds()
-    {
-        binds = false;
-    }
-
-    void run()
-    {
-        if (capturing) {
-            for (int i = 0; i < std::size(down); ++i) {
-                auto last = down[i];
-                down[i] = win32::is_key_down(i);
-                if (!last && down[i]) {
-                    if (i == VK_ESCAPE || i == VK_RETURN) {
-                        continue;
-                    }
-
-                    auto scan = MapVirtualKeyW(i, MAPVK_VK_TO_VSC_EX);
-                    if (scan != 0 && i != MapVirtualKeyW(scan, MAPVK_VSC_TO_VK_EX)) {
-                        continue;
-                    }
-
-                    capturing = false;
-                    captured = i;
-                    break;
-                }
-            }
-        }
-
-        if (binds) {
-            for (int i = 0; i < std::size(g_state.binds); ++i) {
-                down[g_state.binds[i]] = win32::is_key_down(g_state.binds[i]);
-            }
-        }
-    }
-};
 
 struct Console
 {
@@ -320,8 +259,55 @@ struct Console
         redraw_selector(prev);
     }
 
-    void run(HWND hwnd, Input &input)
+private:
+    struct {
+        std::array<bool, win32::VIRTUAL_KEYS> down;
+
+        void start()
+        {
+            for (int vk = 0; vk < std::size(down); ++vk) {
+                down[vk] = win32::is_key_down(vk);
+            }
+        }
+
+        std::optional<int> run()
+        {
+            for (int vk = 0; vk < std::size(down); ++vk) {
+                if (vk == VK_ESCAPE || vk == VK_RETURN) {
+                    continue;
+                }
+
+                auto prev_down = down[vk];
+                down[vk] = win32::is_key_down(vk);
+                if (!prev_down && down[vk]) {
+                    auto scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC_EX);
+                    if (scan != 0 && vk != MapVirtualKeyW(scan, MAPVK_VSC_TO_VK_EX)) {
+                        continue;
+                    }
+                    return vk;
+                }
+            }
+
+            return std::nullopt;
+        }
+    } bind_capturer;
+
+public:
+    bool run()
     {
+        bool ignore_input_events = false;
+
+        if (editing && console_item_type(g_state.selected) == ConsoleItemType::BIND) {
+            ignore_input_events = true;
+
+            auto captured = bind_capturer.run();
+            if (captured) {
+                g_state.binds[std::to_underlying(to_bind(g_state.selected))] = *captured;
+                editing = false;
+                redraw_item_value(g_state.selected);
+            }
+        }
+
         do {
             INPUT_RECORD events[1024];
             auto count = in.consume_input_events(events, std::size(events));
@@ -329,11 +315,7 @@ struct Console
                 break;
             }
 
-            if (editing) {
-                continue;
-            }
-
-            for (int i = 0; i < count; ++i) {
+            for (int i = 0; !ignore_input_events && i < count; ++i) {
                 switch (events[i].EventType) {
                 case WINDOW_BUFFER_SIZE_EVENT:
                     redraw_full();
@@ -342,7 +324,7 @@ struct Console
                     switch (events[i].Event.KeyEvent.wVirtualKeyCode) {
                     case VK_ESCAPE:
                         if (events[i].Event.KeyEvent.bKeyDown) {
-                            PostMessageW(hwnd, WM_QUIT, 0, 0);
+                            return false;
                         }
                         break;
                     case VK_UP:
@@ -383,10 +365,11 @@ struct Console
                             switch (console_item_type(g_state.selected)) {
                             case ConsoleItemType::BIND:
                                 editing = true;
-                                redraw_item_value(g_state.selected);
-                                input.start_capturing();
 
-                                count = 0;
+                                redraw_item_value(g_state.selected);
+                                bind_capturer.start();
+
+                                ignore_input_events = true;
                                 break;
                             case ConsoleItemType::VAR:
                                 editing = true;
@@ -429,20 +412,7 @@ struct Console
             }
         } while (true);
 
-        if (editing) {
-            switch (console_item_type(g_state.selected)) {
-            case ConsoleItemType::BIND:
-                if (input.capturing) {
-                    break;
-                }
-
-                g_state.binds[std::to_underlying(to_bind(g_state.selected))] = input.captured;
-                editing = false;
-
-                redraw_item_value(g_state.selected);
-                break;
-            }
-        }
+        return true;
     }
 
 private:
@@ -776,8 +746,6 @@ struct App
 
         auto hwnd = CreateWindowExW(0, version_info->name, version_info->name, 0, 0, 0, 0, 0, nullptr, nullptr, instance, nullptr);
 
-        Input input;
-
         console.emplace(*version_info);
 
         auto console_hwnd = GetConsoleWindow();
@@ -802,12 +770,10 @@ struct App
         win32::set_timer_resolution(1);
 
         bool active = false;
+        std::array<bool, std::to_underlying(Bind::COUNT)> binds_down;
         MouseMoveState mouse_move_state;
 
         do {
-            auto prev_input_down = input.down;
-            input.run();
-
         peek:
             MSG msg;
             if (PeekMessageW(&msg, hwnd, 0, 0, PM_REMOVE)) {
@@ -818,7 +784,9 @@ struct App
                 goto peek;
             }
 
-            console->run(hwnd, input);
+            if (!console->run()) {
+                break;
+            }
 
             auto prev_active = active;
             active =
@@ -828,29 +796,34 @@ struct App
                 !cursor_visibility_observer.visible();
 
             if (!active) {
-                if (prev_active) {
-                    input.disable_binds();
-                }
-
                 HANDLE handles[] = {console->in.handle};
                 MsgWaitForMultipleObjects(std::size(handles), handles, false, INFINITE, QS_ALLINPUT);
                 continue;
             }
 
+            decltype(binds_down) prev_binds_down;
             if (!prev_active) {
-                input.enable_binds();
+                for (int i = 0; i < std::size(g_state.binds); ++i) {
+                    binds_down[i] = win32::is_key_down(g_state.binds[i]);
+                }
+                prev_binds_down = binds_down;
+            } else {
+                prev_binds_down = binds_down;
+                for (int i = 0; i < std::size(g_state.binds); ++i) {
+                    binds_down[i] = win32::is_key_down(g_state.binds[i]);
+                }
             }
 
-            if (!prev_input_down[g_state.binds[std::to_underlying(Bind::CYCLE)]] && input.down[g_state.binds[std::to_underlying(Bind::CYCLE)]]) {
+            if (!prev_binds_down[std::to_underlying(Bind::CYCLE)] && binds_down[std::to_underlying(Bind::CYCLE)]) {
                 g_state.current = (g_state.current + 1) % g_state.count;
                 g_state.on_current_changed();
             }
 
             auto amount = mouse_move_state.update(
                 !prev_active,
-                input.down[g_state.binds[std::to_underlying(Bind::LEFT)]],
-                input.down[g_state.binds[std::to_underlying(Bind::RIGHT)]],
-                input.down[g_state.binds[std::to_underlying(Bind::SPEED)]],
+                binds_down[std::to_underlying(Bind::LEFT)],
+                binds_down[std::to_underlying(Bind::RIGHT)],
+                binds_down[std::to_underlying(Bind::SPEED)],
                 *g_state.vars[std::to_underlying(Var::RATE)],
                 g_state.cycle_vars[std::to_underlying(CycleVar::YAWSPEED)][g_state.current % g_state.cycle_vars[std::to_underlying(CycleVar::YAWSPEED)].size()],
                 g_state.cycle_vars[std::to_underlying(CycleVar::ANGLESPEEDKEY)][g_state.current % g_state.cycle_vars[std::to_underlying(CycleVar::ANGLESPEEDKEY)].size()],
