@@ -191,12 +191,6 @@ size_t get_raw_input_msgs(const RAWINPUT &input, USHORT (&vks)[5], UINT (&msgs)[
     return count;
 }
 
-size_t get_console_process_count()
-{
-    DWORD list[1];
-    return GetConsoleProcessList(list, std::size(list));
-}
-
 HWND create_window(const wchar_t *class_name, const wchar_t *window_name, WNDPROC proc)
 {
     auto instance = GetModuleHandle(nullptr);
@@ -862,6 +856,12 @@ struct Console
         in(GetStdHandle(STD_INPUT_HANDLE)),
         version_info(version_info)
     {
+        auto icon = static_cast<HICON>(::LoadImageW(GetModuleHandle(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, 0, 0, LR_DEFAULTCOLOR));
+        SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)icon);
+        SendMessage(hwnd, WM_SETICON, ICON_BIG, (LPARAM)icon);
+
+        SetWindowLong(hwnd, GWL_STYLE, GetWindowLong(hwnd, GWL_STYLE) & ~WS_SIZEBOX & ~WS_MAXIMIZEBOX);
+
         initial_in_mode = in.get_mode();
 
         out.set_mode(ENABLE_PROCESSED_OUTPUT);
@@ -877,11 +877,13 @@ struct Console
 
     void on_settings_loaded()
     {
+        resize();
+
         if (g_state.placement) {
             SetWindowPlacement(hwnd, &(*g_state.placement));
         }
         reset_title();
-        resize();
+        ShowWindow(hwnd, SW_SHOWNORMAL);
     }
 
     void on_settings_save()
@@ -1426,6 +1428,23 @@ struct App
     {
         GetModuleFileNameW(nullptr, image_path, std::size(image_path));
 
+        if (std::getenv("__TURNBINDS_CONHOST") == nullptr) {
+            SetEnvironmentVariableW(L"__TURNBINDS_CONHOST", L"");
+
+            wchar_t command_line[MAX_PATH + 1 + std::size(image_path)];
+            std::swprintf(command_line, std::size(command_line), L"conhost.exe %s", image_path);
+
+            STARTUPINFOW startup_info = {};
+            startup_info.cb = sizeof(STARTUPINFOW);
+            startup_info.dwFlags = STARTF_USESHOWWINDOW;
+            startup_info.wShowWindow = SW_HIDE;
+
+            PROCESS_INFORMATION info;
+            CreateProcessW(nullptr, command_line, nullptr, nullptr, true, 0, nullptr, nullptr, &startup_info, &info);
+
+            return;
+        }
+
         version_info.emplace(image_path);
 
         std::wcscpy(ini_path, image_path);
@@ -1436,10 +1455,6 @@ struct App
         input.emplace(hwnd);
 
         console.emplace(*version_info);
-
-        if (win32::get_console_process_count() == 1) {
-            SetWindowLong(console->hwnd, GWL_STYLE, GetWindowLong(console->hwnd, GWL_STYLE) & ~WS_SIZEBOX & ~WS_MAXIMIZEBOX);
-        }
 
         MouseMoveCalculator mouse_move_calculator;
         CursorMonitor cursor_monitor;
