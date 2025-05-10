@@ -1,11 +1,7 @@
 <h1 align="center"><img src="https://user-images.githubusercontent.com/16616463/182579363-4bce6231-b03d-40fb-859e-2b49b4929c15.png" width="24" height="23"> turnbinds</h1>
 
 <p align="center">
-(see <b><a href="https://github.com/t5mat/conturn">conturn</a></b> for in-game turnbinds)
-</p>
-
-<p align="center">
-<img src="https://user-images.githubusercontent.com/16616463/149217736-8c7a002e-1b9e-446a-9603-34a3ebe0e0f0.gif">
+<img src="https://github.com/user-attachments/assets/fb9c403f-cd3b-412d-911d-9a3a7ade4b8a">
 </p>
 
 Provides external turnbinds (`+left/+right`) with customizable yawspeed for movement game modes in Source games.
@@ -85,7 +81,7 @@ Apart from simulating mouse input, it doesn't really do anything suspicious.
 
 It would be fair to say it's as VAC bannable as an AutoHotkey script.
 
-Anti-cheat software (FACEIT AC, ...) can easily detect the simulation of mouse movement though, and either prevent it or prevent the program from running completely. This is expected, just don't actively try to use this program in unintended scenarios.
+Standalone anti-cheat software (FACEIT AC, ...) can easily detect mouse movement simulation, and either prevent it or completely prevent the program from running.
 
 ## Development
 
