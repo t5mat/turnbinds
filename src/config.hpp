@@ -17,7 +17,6 @@ struct Config
     wchar_t cl_anglespeedkey[128];
     wchar_t m_yaw[128];
     bool enabled;
-    bool raw_input;
     int current;
     int selected;
     std::optional<WINDOWPLACEMENT> placement;
@@ -36,7 +35,6 @@ struct Config
         GetPrivateProfileStringW(section, L"cl_anglespeedkey", L"0.67", cl_anglespeedkey, std::size(cl_anglespeedkey), path);
         GetPrivateProfileStringW(section, L"m_yaw", L"0.022", m_yaw, std::size(m_yaw), path);
         enabled = (GetPrivateProfileIntW(section, L"enabled", 1, path) == 1);
-        raw_input = (GetPrivateProfileIntW(section, L"raw_input", 0, path) == 1);
         current = GetPrivateProfileIntW(section, L"current", 0, path);
         selected = GetPrivateProfileIntW(section, L"selected", 0, path);
 
@@ -61,7 +59,6 @@ struct Config
         WritePrivateProfileStringW(section, L"cl_anglespeedkey", cl_anglespeedkey, path);
         WritePrivateProfileStringW(section, L"m_yaw", m_yaw, path);
         WritePrivateProfileIntW(section, L"enabled", enabled, path);
-        WritePrivateProfileIntW(section, L"raw_input", raw_input, path);
         WritePrivateProfileIntW(section, L"current", current, path);
         WritePrivateProfileIntW(section, L"selected", selected, path);
         WritePrivateProfileStructW(section, L"placement", &(*placement), sizeof(*placement), path);

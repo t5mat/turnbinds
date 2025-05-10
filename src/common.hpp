@@ -144,53 +144,6 @@ inline bool get_vk_string(int vk, wchar_t *result, size_t count)
     return GetKeyNameTextW(scan_code << 16, result, count);
 }
 
-inline size_t get_raw_input_msgs(const RAWINPUT &input, USHORT (&vks)[5], UINT (&msgs)[5])
-{
-    constexpr int MOUSE_DOWN[5] = {RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_2_DOWN, RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_5_DOWN};
-    constexpr int MOUSE_UP[5] = {RI_MOUSE_BUTTON_1_UP, RI_MOUSE_BUTTON_2_UP, RI_MOUSE_BUTTON_3_UP, RI_MOUSE_BUTTON_4_UP, RI_MOUSE_BUTTON_5_UP};
-    constexpr int MOUSE_VK[5] = {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2};
-
-    size_t count = 0;
-    switch (input.header.dwType) {
-    case RIM_TYPEMOUSE:
-        for (int i = 0; i < std::size(MOUSE_DOWN); ++i) {
-            if (input.data.mouse.usButtonFlags & MOUSE_DOWN[i]) {
-                vks[count] = MOUSE_VK[i];
-                msgs[count] = WM_KEYDOWN;
-                ++count;
-            } else if (input.data.mouse.usButtonFlags & MOUSE_UP[i]) {
-                vks[count] = MOUSE_VK[i];
-                msgs[count] = WM_KEYUP;
-                ++count;
-            }
-        }
-        break;
-    case RIM_TYPEKEYBOARD:
-        switch (input.data.keyboard.VKey) {
-        case VK_CONTROL:
-            if (input.header.hDevice == nullptr) {
-                vks[count] = VK_ZOOM;
-            } else {
-                vks[count] = (input.data.keyboard.Flags & RI_KEY_E0 ? VK_RCONTROL : VK_LCONTROL);
-            }
-            break;
-        case VK_MENU:
-            vks[count] = (input.data.keyboard.Flags & RI_KEY_E0 ? VK_RMENU : VK_LMENU);
-            break;
-        case VK_SHIFT:
-            vks[count] = (input.data.keyboard.MakeCode == 0x36 ? VK_RSHIFT : VK_LSHIFT);
-            break;
-        default:
-            vks[count] = input.data.keyboard.VKey;
-            break;
-        }
-        msgs[count] = input.data.keyboard.Message;
-        ++count;
-        break;
-    }
-    return count;
-}
-
 namespace {
 
 struct ConsoleBase

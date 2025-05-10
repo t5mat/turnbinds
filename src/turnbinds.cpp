@@ -2,8 +2,6 @@
 #include <optional>
 #include <utility>
 #include <pathcch.h>
-#include <windns.h>
-#include <hidusage.h>
 #include "common.hpp"
 #include "resources.hpp"
 #include "config.hpp"
@@ -39,7 +37,6 @@ enum class CycleVar
 enum class Switch
 {
     ENABLED,
-    RAW_INPUT,
     COUNT
 };
 
@@ -54,7 +51,6 @@ enum class ConsoleItem
     CL_ANGLESPEEDKEY,
     M_YAW,
     ENABLED,
-    RAW_INPUT,
     RATE,
     SLEEP,
     COUNT
@@ -83,7 +79,6 @@ static constexpr auto console_item_type(ConsoleItem item)
     case ConsoleItem::M_YAW:
         return ConsoleItemType::CYCLE_VAR;
     case ConsoleItem::ENABLED:
-    case ConsoleItem::RAW_INPUT:
         return ConsoleItemType::SWITCH;
     case ConsoleItem::RATE:
     case ConsoleItem::SLEEP:
@@ -96,7 +91,6 @@ static constexpr auto console_item_type(ConsoleItem item)
 static constexpr auto is_developer_console_item(ConsoleItem item)
 {
     switch (item) {
-    case ConsoleItem::RAW_INPUT:
     case ConsoleItem::RATE:
     case ConsoleItem::SLEEP:
         return true;
@@ -110,7 +104,7 @@ static constexpr auto is_line_break_console_item(ConsoleItem item)
     switch (item) {
     case ConsoleItem::CL_YAWSPEED:
     case ConsoleItem::ENABLED:
-    case ConsoleItem::RAW_INPUT:
+    case ConsoleItem::RATE:
         return true;
     default:
         return false;
@@ -166,8 +160,6 @@ static constexpr auto to_switch(ConsoleItem item)
     switch (item) {
     case ConsoleItem::ENABLED:
         return Switch::ENABLED;
-    case ConsoleItem::RAW_INPUT:
-        return Switch::RAW_INPUT;
     default:
         return Switch::COUNT;
     }
@@ -214,32 +206,18 @@ struct Input
     USHORT captured;
     bool binds = false;
 
-    Input(HWND hwnd) : hwnd(hwnd) {}
-
     void start_capturing()
     {
         capturing = true;
 
-        if (g_state.switches[std::to_underlying(Switch::RAW_INPUT)]) {
-            if (++raw_input == 1) {
-                enable_raw_input();
-            }
-        } else {
-            for (int i = 0; i < std::size(down); ++i) {
-                down[i] = win32::is_key_down(i);
-            }
+        for (int i = 0; i < std::size(down); ++i) {
+            down[i] = win32::is_key_down(i);
         }
     }
 
     void enable_binds()
     {
         binds = true;
-
-        if (g_state.switches[std::to_underlying(Switch::RAW_INPUT)]) {
-            if (++raw_input == 1) {
-                enable_raw_input();
-            }
-        }
 
         for (int i = 0; i < std::size(g_state.binds); ++i) {
             down[g_state.binds[i]] = win32::is_key_down(g_state.binds[i]);
@@ -249,154 +227,36 @@ struct Input
     void disable_binds()
     {
         binds = false;
-
-        if (g_state.switches[std::to_underlying(Switch::RAW_INPUT)]) {
-            if (--raw_input == 0) {
-                disable_raw_input();
-            }
-        }
-    }
-
-    void on_switch_changed(Switch switch_)
-    {
-        switch (switch_) {
-        case Switch::RAW_INPUT:
-            if (!g_state.switches[std::to_underlying(switch_)] && raw_input > 0) {
-                raw_input = 0;
-                disable_raw_input();
-            }
-            if (capturing) {
-                start_capturing();
-            }
-            if (binds) {
-                enable_binds();
-            }
-            break;
-        }
     }
 
     void run()
     {
-        if (!g_state.switches[std::to_underlying(Switch::RAW_INPUT)]) {
-            if (capturing) {
-                for (int i = 0; i < std::size(down); ++i) {
-                    auto last = down[i];
-                    down[i] = win32::is_key_down(i);
-                    if (!last && down[i]) {
-                        if (i == VK_ESCAPE || i == VK_RETURN) {
-                            continue;
-                        }
-
-                        auto scan = MapVirtualKeyW(i, MAPVK_VK_TO_VSC_EX);
-                        if (scan != 0 && i != MapVirtualKeyW(scan, MAPVK_VSC_TO_VK_EX)) {
-                            continue;
-                        }
-
-                        capturing = false;
-                        captured = i;
-                        break;
+        if (capturing) {
+            for (int i = 0; i < std::size(down); ++i) {
+                auto last = down[i];
+                down[i] = win32::is_key_down(i);
+                if (!last && down[i]) {
+                    if (i == VK_ESCAPE || i == VK_RETURN) {
+                        continue;
                     }
-                }
-            }
 
-            if (binds) {
-                for (int i = 0; i < std::size(g_state.binds); ++i) {
-                    down[g_state.binds[i]] = win32::is_key_down(g_state.binds[i]);
+                    auto scan = MapVirtualKeyW(i, MAPVK_VK_TO_VSC_EX);
+                    if (scan != 0 && i != MapVirtualKeyW(scan, MAPVK_VSC_TO_VK_EX)) {
+                        continue;
+                    }
+
+                    capturing = false;
+                    captured = i;
+                    break;
                 }
             }
         }
 
-        UINT size;
-        GetRawInputBuffer(nullptr, &size, sizeof(RAWINPUTHEADER));
-        size *= 1024;
-
-        char buffer_[size];
-        auto buffer = reinterpret_cast<RAWINPUT *>(buffer_);
-
-        do {
-            int read = GetRawInputBuffer(buffer, &size, sizeof(RAWINPUTHEADER));
-            if (read == 0) {
-                break;
+        if (binds) {
+            for (int i = 0; i < std::size(g_state.binds); ++i) {
+                down[g_state.binds[i]] = win32::is_key_down(g_state.binds[i]);
             }
-
-            if (!g_state.switches[std::to_underlying(Switch::RAW_INPUT)]) {
-                continue;
-            }
-
-            for (const RAWINPUT *input = buffer; read-- > 0; input = NEXTRAWINPUTBLOCK(input)) {
-                USHORT vks[5];
-                UINT msgs[5];
-                auto count = win32::get_raw_input_msgs(*input, vks, msgs);
-
-                if (binds) {
-                    for (int i = 0; i < count; ++i) {
-                        for (int j = 0; j < std::size(g_state.binds); ++j) {
-                            if (g_state.binds[j] == vks[i]) {
-                                switch (msgs[i]) {
-                                case WM_KEYDOWN:
-                                case WM_SYSKEYDOWN:
-                                    down[g_state.binds[j]] = true;
-                                    break;
-                                case WM_KEYUP:
-                                case WM_SYSKEYUP:
-                                    down[g_state.binds[j]] = false;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (capturing) {
-                    for (int i = 0; i < count; ++i) {
-                        if (msgs[i] == WM_KEYDOWN) {
-                            if (vks[i] == VK_ESCAPE || vks[i] == VK_RETURN) {
-                                continue;
-                            }
-
-                            capturing = false;
-                            captured = vks[i];
-
-                            --raw_input;
-                            disable_raw_input();
-                            break;
-                        }
-                    }
-                }
-            }
-        } while (true);
-    }
-
-private:
-    HWND hwnd;
-    int raw_input = 0;
-
-    void enable_raw_input()
-    {
-        RAWINPUTDEVICE devices[2];
-        devices[0].usUsagePage = HID_USAGE_PAGE_GENERIC;
-        devices[0].usUsage = HID_USAGE_GENERIC_MOUSE;
-        devices[0].dwFlags = RIDEV_INPUTSINK | RIDEV_NOLEGACY;
-        devices[0].hwndTarget = hwnd;
-        devices[1].usUsagePage = HID_USAGE_PAGE_GENERIC;
-        devices[1].usUsage = HID_USAGE_GENERIC_KEYBOARD;
-        devices[1].dwFlags = RIDEV_INPUTSINK | RIDEV_NOLEGACY;
-        devices[1].hwndTarget = hwnd;
-        RegisterRawInputDevices(devices, std::size(devices), sizeof(*devices));
-    }
-
-    void disable_raw_input()
-    {
-        RAWINPUTDEVICE devices[2];
-        devices[0].usUsagePage = HID_USAGE_PAGE_GENERIC;
-        devices[0].usUsage = HID_USAGE_GENERIC_MOUSE;
-        devices[0].dwFlags = RIDEV_REMOVE;
-        devices[0].hwndTarget = nullptr;
-        devices[1].usUsagePage = HID_USAGE_PAGE_GENERIC;
-        devices[1].usUsage = HID_USAGE_GENERIC_KEYBOARD;
-        devices[1].dwFlags = RIDEV_REMOVE;
-        devices[1].hwndTarget = nullptr;
-        RegisterRawInputDevices(devices, std::size(devices), sizeof(*devices));
+        }
     }
 };
 
@@ -443,9 +303,6 @@ struct Console
         switch (switch_) {
         case Switch::ENABLED:
             redraw_item_value(ConsoleItem::ENABLED);
-            break;
-        case Switch::RAW_INPUT:
-            redraw_item_value(ConsoleItem::RAW_INPUT);
             break;
         }
     }
@@ -599,13 +456,12 @@ private:
         L"cl_anglespeedkey",
         L"m_yaw",
         L"enabled",
-        L"raw input",
         L"rate",
         L"sleep"
     };
     static constexpr const wchar_t *SELECTOR[] = {L"   ", L" » "};
     static constexpr SHORT BUFFER_WIDTH = 64;
-    static constexpr SHORT BUFFER_HEIGHT[] = {17, 21};
+    static constexpr SHORT BUFFER_HEIGHT[] = {17, 20};
     static constexpr auto INPUT_PADDING = 18;
 
     const VersionInfo &version_info;
@@ -866,7 +722,6 @@ private:
 struct App
 {
     inline static std::optional<VersionInfo> version_info;
-    inline static std::optional<Input> input;
     inline static std::optional<Console> console;
 
     static void run()
@@ -921,7 +776,7 @@ struct App
 
         auto hwnd = CreateWindowExW(0, version_info->name, version_info->name, 0, 0, 0, 0, 0, nullptr, nullptr, instance, nullptr);
 
-        input.emplace(hwnd);
+        Input input;
 
         console.emplace(*version_info);
 
@@ -950,8 +805,8 @@ struct App
         MouseMoveState mouse_move_state;
 
         do {
-            auto prev_input_down = input->down;
-            input->run();
+            auto prev_input_down = input.down;
+            input.run();
 
         peek:
             MSG msg;
@@ -963,7 +818,7 @@ struct App
                 goto peek;
             }
 
-            console->run(hwnd, *input);
+            console->run(hwnd, input);
 
             auto prev_active = active;
             active =
@@ -974,7 +829,7 @@ struct App
 
             if (!active) {
                 if (prev_active) {
-                    input->disable_binds();
+                    input.disable_binds();
                 }
 
                 HANDLE handles[] = {console->in.handle};
@@ -983,19 +838,19 @@ struct App
             }
 
             if (!prev_active) {
-                input->enable_binds();
+                input.enable_binds();
             }
 
-            if (!prev_input_down[g_state.binds[std::to_underlying(Bind::CYCLE)]] && input->down[g_state.binds[std::to_underlying(Bind::CYCLE)]]) {
+            if (!prev_input_down[g_state.binds[std::to_underlying(Bind::CYCLE)]] && input.down[g_state.binds[std::to_underlying(Bind::CYCLE)]]) {
                 g_state.current = (g_state.current + 1) % g_state.count;
                 g_state.on_current_changed();
             }
 
             auto amount = mouse_move_state.update(
                 !prev_active,
-                input->down[g_state.binds[std::to_underlying(Bind::LEFT)]],
-                input->down[g_state.binds[std::to_underlying(Bind::RIGHT)]],
-                input->down[g_state.binds[std::to_underlying(Bind::SPEED)]],
+                input.down[g_state.binds[std::to_underlying(Bind::LEFT)]],
+                input.down[g_state.binds[std::to_underlying(Bind::RIGHT)]],
+                input.down[g_state.binds[std::to_underlying(Bind::SPEED)]],
                 *g_state.vars[std::to_underlying(Var::RATE)],
                 g_state.cycle_vars[std::to_underlying(CycleVar::YAWSPEED)][g_state.current % g_state.cycle_vars[std::to_underlying(CycleVar::YAWSPEED)].size()],
                 g_state.cycle_vars[std::to_underlying(CycleVar::ANGLESPEEDKEY)][g_state.current % g_state.cycle_vars[std::to_underlying(CycleVar::ANGLESPEEDKEY)].size()],
@@ -1041,7 +896,6 @@ void State::on_config_loaded(Config &config)
     std::wcscpy(g_state.cycle_vars_text[std::to_underlying(CycleVar::ANGLESPEEDKEY)], config.cl_anglespeedkey);
     std::wcscpy(g_state.cycle_vars_text[std::to_underlying(CycleVar::YAW)], config.m_yaw);
     g_state.switches[std::to_underlying(Switch::ENABLED)] = config.enabled;
-    g_state.switches[std::to_underlying(Switch::RAW_INPUT)] = config.raw_input;
     g_state.current = config.current;
     g_state.selected = static_cast<ConsoleItem>(config.selected);
     g_state.placement = config.placement;
@@ -1079,7 +933,6 @@ void State::on_config_save(Config &config)
     std::wcscpy(config.cl_anglespeedkey, g_state.cycle_vars_text[std::to_underlying(CycleVar::ANGLESPEEDKEY)]);
     std::wcscpy(config.m_yaw, g_state.cycle_vars_text[std::to_underlying(CycleVar::YAW)]);
     config.enabled = g_state.switches[std::to_underlying(Switch::ENABLED)];
-    config.raw_input = g_state.switches[std::to_underlying(Switch::RAW_INPUT)];
     config.current = g_state.current;
     config.selected = std::to_underlying(g_state.selected);
     config.placement = g_state.placement;
@@ -1113,7 +966,6 @@ void State::on_cycle_vars_changed()
 
 void State::on_switch_changed(Switch switch_)
 {
-    App::input->on_switch_changed(switch_);
     App::console->on_switch_changed(switch_);
 
     switch (switch_) {

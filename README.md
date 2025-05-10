@@ -72,7 +72,6 @@ sensitivity 2.0
 
 Navigate down until the selector is hidden and press **Return** to enter developer mode.
 
-- *raw input* (default off) - key detection method **should probably be kept off, see [issue #2](https://github.com/t5mat/turnbinds/issues/2)**
 - *rate* (default 1000) - maximum number of simulated mouse inputs per second, lower values decrease CPU usage in favor of turn smoothness
 - *sleep* (default 3500) - main loop sleep duration (measured in 100ns units, 3500 = 0.35ms), higher values decrease input polling rate and overall CPU usage
 
