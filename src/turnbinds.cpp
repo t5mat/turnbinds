@@ -984,6 +984,15 @@ void State::parse_var(Var var)
         return;
     }
 
+    switch (var) {
+    case Var::RATE:
+        if (d == 0.0) {
+            g_state.vars[std::to_underlying(var)] = std::nullopt;
+            return;
+        }
+        break;
+    }
+
     g_state.vars[std::to_underlying(var)] = d;
 }
 
