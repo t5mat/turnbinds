@@ -78,7 +78,7 @@ const auto PERFORMANCE_COUNTER_FREQUENCY = performance_counter_frequency();
 double GetPrivateProfileDoubleW(LPCWSTR lpAppName, LPCWSTR lpKeyName, double dblDefault, LPCWSTR lpFileName)
 {
     wchar_t buffer[128];
-    GetPrivateProfileStringW(lpAppName, lpKeyName, L"", buffer, sizeof(buffer), lpFileName);
+    GetPrivateProfileStringW(lpAppName, lpKeyName, L"", buffer, std::size(buffer), lpFileName);
 
     double result;
     if (buffer[0] == L'\0' || *parse_double(buffer, result) != L'\0' || std::isnan(result)) {
