@@ -273,7 +273,7 @@ private:
         std::optional<int> run()
         {
             for (int vk = 0; vk < std::size(down); ++vk) {
-                if (vk == VK_ESCAPE || vk == VK_RETURN) {
+                if (vk == VK_RETURN) {
                     continue;
                 }
 
@@ -302,7 +302,9 @@ public:
 
             auto captured = bind_capturer.run();
             if (captured) {
-                g_state.binds[std::to_underlying(to_bind(g_state.selected))] = *captured;
+                if (captured != VK_ESCAPE) {
+                    g_state.binds[std::to_underlying(to_bind(g_state.selected))] = *captured;
+                }
                 editing = false;
                 redraw_item_value(g_state.selected);
             }
