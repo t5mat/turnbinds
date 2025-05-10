@@ -400,60 +400,6 @@ private:
     }
 };
 
-struct ConsoleWindow
-{
-    ConsoleWindow(const VersionInfo &version_info, HICON icon) :
-        version_info(version_info),
-        hwnd(GetConsoleWindow())
-    {
-        SendMessage(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(icon));
-        SendMessage(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(icon));
-
-        SetWindowLong(hwnd, GWL_STYLE, GetWindowLong(hwnd, GWL_STYLE) & ~WS_SIZEBOX & ~WS_MAXIMIZEBOX);
-    }
-
-    void on_config_loaded()
-    {
-        if (g_state.placement) {
-            SetWindowPlacement(hwnd, &(*g_state.placement));
-        }
-        reset_title();
-        ShowWindow(hwnd, SW_SHOWNORMAL);
-    }
-
-    void on_config_save()
-    {
-        g_state.placement = {};
-        GetWindowPlacement(hwnd, &(*g_state.placement));
-    }
-
-    void on_switch_changed(Switch switch_)
-    {
-        switch (switch_) {
-        case Switch::ENABLED:
-            reset_title();
-            break;
-        }
-    }
-
-    void on_valid_updated()
-    {
-        reset_title();
-    }
-
-private:
-    const VersionInfo &version_info;
-
-    HWND hwnd;
-
-    void reset_title()
-    {
-        wchar_t buffer[128];
-        std::swprintf(buffer, std::size(buffer), L"%s%s", version_info.title, (!g_state.valid ? L" (error)" : (g_state.switches[std::to_underlying(Switch::ENABLED)] ? L"" : L" (disabled)")));
-        SetConsoleTitleW(buffer);
-    }
-};
-
 struct Console
 {
     win32::ConsoleOutput out;
@@ -478,9 +424,13 @@ struct Console
         in.set_mode(initial_in_mode);
     }
 
-    void on_config_loaded()
+    void resize()
     {
-        resize();
+        out.set_window_info(true, {0, 0, 0, 0});
+        out.set_buffer_size({1, 1});
+        out.set_window_info(true, {0, 0, BUFFER_WIDTH - 1, static_cast<SHORT>(BUFFER_HEIGHT[g_state.developer] - 1)});
+        out.set_buffer_size({BUFFER_WIDTH, static_cast<SHORT>(BUFFER_HEIGHT[g_state.developer])});
+        out.set_window_info(true, {0, 0, BUFFER_WIDTH - 1, static_cast<SHORT>(BUFFER_HEIGHT[g_state.developer] - 1)});
     }
 
     void on_developer_changed()
@@ -664,15 +614,6 @@ private:
 
     COORD positions_selector[std::to_underlying(ConsoleItem::COUNT)];
     COORD positions_value[std::to_underlying(ConsoleItem::COUNT)];
-
-    void resize()
-    {
-        out.set_window_info(true, {0, 0, 0, 0});
-        out.set_buffer_size({1, 1});
-        out.set_window_info(true, {0, 0, BUFFER_WIDTH - 1, static_cast<SHORT>(BUFFER_HEIGHT[g_state.developer] - 1)});
-        out.set_buffer_size({BUFFER_WIDTH, static_cast<SHORT>(BUFFER_HEIGHT[g_state.developer])});
-        out.set_window_info(true, {0, 0, BUFFER_WIDTH - 1, static_cast<SHORT>(BUFFER_HEIGHT[g_state.developer] - 1)});
-    }
 
     void read_input_value(ConsoleItem item)
     {
@@ -924,9 +865,9 @@ private:
 
 struct App
 {
+    inline static std::optional<VersionInfo> version_info;
     inline static std::optional<Input> input;
     inline static std::optional<Console> console;
-    inline static std::optional<ConsoleWindow> console_window;
 
     static void run()
     {
@@ -952,7 +893,7 @@ struct App
             return;
         }
 
-        VersionInfo version_info(image_path);
+        version_info.emplace(image_path);
         auto icon = load_icon_resource(instance);
 
         wchar_t ini_path[PATHCCH_MAX_CCH];
@@ -975,21 +916,32 @@ struct App
             return 0;
         };
         cls.hInstance = instance;
-        cls.lpszClassName = version_info.name;
+        cls.lpszClassName = version_info->name;
         RegisterClassExW(&cls);
 
-        auto hwnd = CreateWindowExW(0, version_info.name, version_info.name, 0, 0, 0, 0, 0, nullptr, nullptr, instance, nullptr);
+        auto hwnd = CreateWindowExW(0, version_info->name, version_info->name, 0, 0, 0, 0, 0, nullptr, nullptr, instance, nullptr);
 
         input.emplace(hwnd);
 
-        console.emplace(version_info);
-        console_window.emplace(version_info, icon);
+        console.emplace(*version_info);
+
+        auto console_hwnd = GetConsoleWindow();
+        SendMessage(console_hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(icon));
+        SendMessage(console_hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(icon));
+        SetWindowLong(console_hwnd, GWL_STYLE, GetWindowLong(console_hwnd, GWL_STYLE) & ~WS_SIZEBOX & ~WS_MAXIMIZEBOX);
 
         win32::CursorVisibilityObserver cursor_visibility_observer;
         win32::CtrlSignalHandler ctrl_signal_handler(hwnd);
 
-        Config config(ini_path, version_info.name);
+        Config config(ini_path, version_info->name);
         g_state.on_config_loaded(config);
+
+        if (g_state.placement) {
+            SetWindowPlacement(console_hwnd, &(*g_state.placement));
+        }
+        console->resize();
+        reset_console_window_title();
+        ShowWindow(console_hwnd, SW_SHOWNORMAL);
 
         SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
         win32::set_timer_resolution(1);
@@ -1058,10 +1010,20 @@ struct App
 
         console.reset();
 
+        g_state.placement = {};
+        GetWindowPlacement(console_hwnd, &(*g_state.placement));
+
         g_state.on_config_save(config);
-        config.save(ini_path, version_info.name);
+        config.save(ini_path, version_info->name);
 
         ctrl_signal_handler.done();
+    }
+
+    static void reset_console_window_title()
+    {
+        wchar_t buffer[128];
+        std::swprintf(buffer, std::size(buffer), L"%s%s", version_info->title, (!g_state.valid ? L" (error)" : (g_state.switches[std::to_underlying(Switch::ENABLED)] ? L"" : L" (disabled)")));
+        SetConsoleTitleW(buffer);
     }
 };
 
@@ -1101,15 +1063,10 @@ void State::on_config_loaded(Config &config)
     while (!g_state.developer && is_developer_console_item(g_state.selected)) {
         g_state.selected = static_cast<ConsoleItem>((std::to_underlying(g_state.selected) + 1) % (std::to_underlying(ConsoleItem::COUNT) + 1));
     }
-
-    App::console->on_config_loaded();
-    App::console_window->on_config_loaded();
 }
 
 void State::on_config_save(Config &config)
 {
-    App::console_window->on_config_save();
-
     config.developer = g_state.developer;
     config.bind_left = g_state.binds[std::to_underlying(Bind::LEFT)];
     config.bind_right = g_state.binds[std::to_underlying(Bind::RIGHT)];
@@ -1158,7 +1115,12 @@ void State::on_switch_changed(Switch switch_)
 {
     App::input->on_switch_changed(switch_);
     App::console->on_switch_changed(switch_);
-    App::console_window->on_switch_changed(switch_);
+
+    switch (switch_) {
+    case Switch::ENABLED:
+        App::reset_console_window_title();
+        break;
+    }
 }
 
 void State::on_current_changed()
@@ -1168,7 +1130,7 @@ void State::on_current_changed()
 
 void State::on_valid_updated()
 {
-    App::console_window->on_valid_updated();
+    App::reset_console_window_title();
 }
 
 void State::on_selected_changed(ConsoleItem prev)
