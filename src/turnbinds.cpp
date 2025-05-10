@@ -1470,27 +1470,41 @@ struct CursorMonitor
     CursorMonitor()
     {
         SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_HIDE, nullptr, proc, 0, 0, WINEVENT_OUTOFCONTEXT);
+        SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE, nullptr, proc, 0, 0, WINEVENT_OUTOFCONTEXT);
 
-        CURSORINFO info = {};
-        info.cbSize = sizeof(info);
-        GetCursorInfo(&info);
-        cursor_ = info.flags & CURSOR_SHOWING;
+        visible_ = check_visible();
     }
 
-    auto cursor()
+    auto visible()
     {
-        return cursor_;
+        return visible_;
     }
 
 private:
     static void proc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD idEventThread, DWORD dwmsEventTime)
     {
-        if (idObject == OBJID_CURSOR) {
-            cursor_ = (event == EVENT_OBJECT_SHOW);
+        if (idObject != OBJID_CURSOR) {
+            return;
         }
+        visible_ = check_visible();
     }
 
-    static inline bool cursor_;
+    static bool check_visible()
+    {
+        CURSORINFO info = {};
+        info.cbSize = sizeof(info);
+        GetCursorInfo(&info);
+        if (!(info.flags & CURSOR_SHOWING)) {
+            return false;
+        }
+
+        ICONINFOEXW icon_info = {};
+        icon_info.cbSize = sizeof(ICONINFOEXW);
+        GetIconInfoExW(info.hCursor, &icon_info);
+        return icon_info.hbmColor != nullptr || *icon_info.szModName != L'\0';
+    }
+
+    static inline bool visible_;
 };
 
 struct CtrlSignalHandler
@@ -1581,7 +1595,7 @@ struct App
             console->run(hwnd, *input);
 
             auto last_active = active;
-            active = (!console->editing && g_state.switches[std::to_underlying(Switch::ENABLED)] && g_state.valid && !cursor_monitor.cursor());
+            active = (!console->editing && g_state.switches[std::to_underlying(Switch::ENABLED)] && g_state.valid && !cursor_monitor.visible());
 
             if (!active) {
                 if (last_active) {
